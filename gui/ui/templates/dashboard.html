@@ -68,8 +68,70 @@
     </svg>
     <h1>Tailhopper Dashboard</h1>
   </div>
+
+  <!-- SOCKS5 Proxy Setup Section -->
+  <div class="setup-section">
+    <h2>🔌 SOCKS5 Proxy Setup</h2>
+    <div class="setup-grid">
+      <div class="setup-card">
+        <h3>Option 1: PAC File (Recommended)</h3>
+        <p>Configure your browser to use automatic proxy configuration:</p>
+        <div class="code-block">
+          <code id="pac-url">http://localhost:8888{{.PACFileURL}}</code>
+          <button class="copy-btn" onclick="copyToClipboard('pac-url')">Copy</button>
+        </div>
+        <p class="setup-note">This routes only <strong>*.{{.BaseDomain}}</strong> through the proxy.</p>
+      </div>
+      <div class="setup-card">
+        <h3>Option 2: Manual SOCKS5</h3>
+        <p>Or configure SOCKS5 proxy directly in your browser/app:</p>
+        <div class="code-block">
+          <code>Host: <span id="socks-host">{{.SocksHost}}</span></code>
+          <button class="copy-btn" onclick="copyToClipboard('socks-host')">Copy</button>
+        </div>
+        <div class="code-block">
+          <code>Port: <span id="socks-port">{{.SocksPort}}</span></code>
+          <button class="copy-btn" onclick="copyToClipboard('socks-port')">Copy</button>
+        </div>
+        <p class="setup-note">For curl: <code>curl --socks5-hostname {{.SocksAddr}} https://machine.{{.BaseDomain}}</code></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Connections Section -->
+  <div class="connections-section">
+    <h2>📡 Recent Connections</h2>
+    <div id="connections-list" class="connections-list">
+      {{if .Connections}}
+      <table class="connections-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Target</th>
+            <th>Duration</th>
+            <th>Data</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Connections}}
+          <tr class="{{if .Active}}active{{else if .Error}}error{{end}}">
+            <td>{{if .Active}}<span class="status-dot active"></span>{{else if .Error}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}</td>
+            <td class="target">{{.Host}}:{{.Port}}</td>
+            <td class="duration">{{if .Active}}ongoing{{else}}{{formatDuration .StartTime .EndTime}}{{end}}</td>
+            <td class="data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="no-connections">No connections yet. Configure your browser with the PAC file above to get started.</p>
+      {{end}}
+    </div>
+  </div>
+
   <h2 class="machines-title">Available Machines <span class="tailnet-tag">{{.BaseDomain}}</span></h2>
 
+  {{if .Machines}}
   {{range .Machines}}
   <div class="machine" data-machine="{{.Name}}">
     <div class="machine-header">
@@ -111,7 +173,7 @@
         <span class="scheme-label">HTTPS</span>
       </label>
       <button id="connect-{{.Name}}" onclick="connectSelected('{{.Name}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
-        Connect
+        Open
         <span class="connect-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true">
             <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"></path>
@@ -122,6 +184,12 @@
     </div>
 
     <div class="machine-addrs">IPs: {{.IPs}}</div>
+  </div>
+  {{end}}
+  {{else}}
+  <div class="empty-state">
+    <p class="empty-state-message">No machines found on your tailnet.</p>
+    <p class="empty-state-hint">Make sure other devices are connected to your Tailscale network and that your ACLs allow <code>{{.Hostname}}</code> to see them.</p>
   </div>
   {{end}}
 </body>

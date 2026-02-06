@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
@@ -11,19 +12,28 @@ import (
 	"net/http"
 	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"tailscale.com/tsnet"
+	"github.com/jcambass/tailhopper/pac"
+	"github.com/jcambass/tailhopper/portscan"
+	"github.com/jcambass/tailhopper/socks"
+	"github.com/jcambass/tailhopper/ts"
 )
 
 var (
-	scanCache      = make(map[string][]portInfo)
-	scanCacheMutex sync.RWMutex
-	scanState      = make(map[string]int)
-	scanStateMutex sync.RWMutex
+	// Scan cache for port scanning results
+	scanCache = portscan.NewCache()
+
+	// Channel for tsnet connection error (buffered so send doesn't block)
+	TsnetErrorCh = make(chan error, 1)
+	// Channel that gets closed when tsnet is ready
+	TsnetReadyCh = make(chan struct{})
+	// Channel that gets closed when connection is taking too long
+	TsnetSlowCh = make(chan struct{})
+	// Channel for auth URL when login is needed (buffered so send doesn't block)
+	TsnetAuthURLCh = make(chan string, 1)
 )
 
 //go:embed ui/templates/*.html ui/static/*
@@ -37,89 +47,63 @@ var (
 
 func init() {
 	var err error
-	templates, err = template.ParseFS(uiFS, "ui/templates/*.html")
+	funcMap := template.FuncMap{
+		"formatDuration": formatDuration,
+		"formatBytes":    formatBytes,
+	}
+	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "ui/templates/*.html")
 	if err != nil {
 		panic(err)
 	}
 }
 
-type portInfo struct {
-	Port  uint16
-	Label string
+func formatDuration(start, end time.Time) string {
+	if end.IsZero() {
+		return "ongoing"
+	}
+	d := end.Sub(start)
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%.1fm", d.Minutes())
 }
 
-// Common HTTP/web application ports - scan entire range 20-9999
-var commonHTTPPorts = generatePortRange(20, 9999)
-
-func generatePortRange(start, end int) []int {
-	ports := make([]int, 0, end-start+1)
-	for i := start; i <= end; i++ {
-		ports = append(ports, i)
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
 	}
-	return ports
-}
-
-// y u not export Discovered Endpoints in the API Tailscale? :sad:
-func scanHostPorts(ctx context.Context, host string, ports []int, dialer func(context.Context, string, string) (net.Conn, error)) []portInfo {
-	type result struct {
-		port int
-		open bool
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
 	}
-
-	results := make(chan result, len(ports))
-	var wg sync.WaitGroup
-
-	// Limit concurrent scans per host
-	sem := make(chan struct{}, 50)
-
-	for _, port := range ports {
-		wg.Add(1)
-		go func(p int) {
-			defer wg.Done()
-
-			select {
-			case <-ctx.Done():
-				results <- result{port: p, open: false}
-				return
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			}
-
-			// Create a timeout context for this port dial
-			dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			defer cancel()
-
-			addr := net.JoinHostPort(host, strconv.Itoa(p))
-			conn, err := dialer(dialCtx, "tcp", addr)
-			if err == nil {
-				conn.Close()
-				results <- result{port: p, open: true}
-			} else {
-				results <- result{port: p, open: false}
-			}
-		}(port)
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	var openPorts []portInfo
-	for res := range results {
-		if res.open {
-			openPorts = append(openPorts, portInfo{
-				Port:  uint16(res.port),
-				Label: strconv.Itoa(res.port),
-			})
-		}
-	}
-	return openPorts
+	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 type dashboardData struct {
-	BaseDomain string
-	Machines   []machineView
+	BaseDomain  string
+	Hostname    string
+	SocksAddr   string
+	SocksHost   string
+	SocksPort   string
+	PACFileURL  string
+	Machines    []machineView
+	Connections []connectionView
+}
+
+type connectionView struct {
+	Host      string
+	Port      string
+	StartTime time.Time
+	EndTime   time.Time
+	BytesSent int64
+	BytesRecv int64
+	Active    bool
+	Error     string
 }
 
 type machineView struct {
@@ -128,7 +112,7 @@ type machineView struct {
 	StatusClass  string
 	StatusText   string
 	IPs          string
-	CachedPorts  []portInfo
+	CachedPorts  []portscan.PortInfo
 	Scanned      bool
 	DefaultHTTPS bool
 	HasPorts     bool
@@ -136,11 +120,17 @@ type machineView struct {
 }
 
 func renderTemplate(w http.ResponseWriter, name string, data interface{}) error {
+	var buf strings.Builder
+	if err := templates.ExecuteTemplate(&buf, name, data); err != nil {
+		return err
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	return templates.ExecuteTemplate(w, name, data)
+	_, err := w.Write([]byte(buf.String()))
+	return err
 }
 
-func getStaticHandler() http.Handler {
+// StaticHandler returns an http.Handler for serving static files.
+func StaticHandler() http.Handler {
 	staticOnce.Do(func() {
 		sub, err := fs.Sub(uiFS, "ui/static")
 		if err != nil {
@@ -152,23 +142,99 @@ func getStaticHandler() http.Handler {
 	return staticHandler
 }
 
-func RegisterHandlers(mux *http.ServeMux, s *tsnet.Server, baseDomain string) {
-	if strings.TrimSpace(baseDomain) == "" {
-		log.Fatal("baseDomain is required")
-	}
-	mux.Handle("/static/", getStaticHandler())
-	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
-	mux.Handle("/api/scan", handleScanAPI(s, baseDomain))
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			serveDashboard(w, r, s, baseDomain)
-			return
+// HandleConnectionsAPI returns a handler for the connections API endpoint.
+func HandleConnectionsAPI(connLog *socks.ConnectionLog) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		recent, live := connLog.GetRecent(20)
+
+		connections := make([]connectionView, 0, len(live)+len(recent))
+		for _, lc := range live {
+			connections = append(connections, connectionView{
+				Host:      lc.Host,
+				Port:      lc.Port,
+				StartTime: lc.StartTime,
+				BytesSent: lc.BytesSent,
+				BytesRecv: lc.BytesRecv,
+				Active:    true,
+			})
 		}
-		http.Error(w, "not found", http.StatusNotFound)
-	}))
+		for _, c := range recent {
+			connections = append(connections, connectionView{
+				Host:      c.Host,
+				Port:      c.Port,
+				StartTime: c.StartTime,
+				EndTime:   c.EndTime,
+				BytesSent: c.BytesSent,
+				BytesRecv: c.BytesRecv,
+				Error:     c.Error,
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(connections)
+	}
 }
 
-func handleScanAPI(s *tsnet.Server, baseDomain string) http.HandlerFunc {
+// HandleMachinesAPI returns a handler for the machines API endpoint.
+func HandleMachinesAPI(tsServer *ts.Server) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		baseDomain := tsServer.BaseDomain()
+
+		lc, err := tsServer.LocalClient()
+		if err != nil {
+			http.Error(w, "failed to get local client", http.StatusInternalServerError)
+			return
+		}
+
+		status, err := lc.Status(r.Context())
+		if err != nil {
+			http.Error(w, "failed to get status", http.StatusInternalServerError)
+			return
+		}
+
+		machines := []machineView{}
+
+		for _, peer := range status.Peer {
+			if len(peer.TailscaleIPs) == 0 {
+				continue
+			}
+
+			machineName := peer.DNSName
+			if machineName != "" {
+				machineName = strings.TrimSuffix(machineName, ".")
+				machineName = strings.TrimSuffix(machineName, "."+baseDomain)
+			}
+			if machineName == "" {
+				machineName = peer.HostName
+			}
+
+			statusClass := "offline"
+			statusText := "offline"
+			if peer.Online {
+				statusClass = "online"
+				statusText = "online"
+			}
+
+			machines = append(machines, machineView{
+				Name:        machineName,
+				DNSName:     peer.DNSName,
+				StatusClass: statusClass,
+				StatusText:  statusText,
+				IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
+			})
+		}
+
+		sort.Slice(machines, func(i, j int) bool {
+			return strings.ToLower(machines[i].Name) < strings.ToLower(machines[j].Name)
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(machines)
+	}
+}
+
+// HandleScanAPI returns a handler for the port scanning API endpoint.
+func HandleScanAPI(tsServer *ts.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -183,10 +249,12 @@ func handleScanAPI(s *tsnet.Server, baseDomain string) http.HandlerFunc {
 			return
 		}
 
+		baseDomain := tsServer.BaseDomain()
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		localClient, err := s.LocalClient()
+		localClient, err := tsServer.LocalClient()
 		if err != nil {
 			http.Error(w, "failed to get client", http.StatusInternalServerError)
 			return
@@ -202,10 +270,7 @@ func handleScanAPI(s *tsnet.Server, baseDomain string) http.HandlerFunc {
 		var targetIP string
 		for _, peer := range status.Peer {
 			peerName := peer.HostName
-			dns := peer.DNSName
-			if strings.HasSuffix(dns, ".") {
-				dns = strings.TrimSuffix(dns, ".")
-			}
+			dns := strings.TrimSuffix(peer.DNSName, ".")
 			dns = strings.TrimSuffix(dns, "."+baseDomain)
 
 			if peerName == req.Machine || dns == req.Machine {
@@ -221,20 +286,18 @@ func handleScanAPI(s *tsnet.Server, baseDomain string) http.HandlerFunc {
 			return
 		}
 
-		startScan(req.Machine)
-		defer finishScan(req.Machine)
+		scanCache.StartScan(req.Machine)
+		defer scanCache.FinishScan(req.Machine)
 
 		// Scan just this machine using Tailscale dialer
 		scanCtx, scanCancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer scanCancel()
 
-		openPorts := scanHostPorts(scanCtx, targetIP, generatePortRange(20, 9999), s.Dial)
-		openPorts = sortPorts(openPorts)
+		openPorts := portscan.ScanHost(scanCtx, targetIP, portscan.CommonHTTPPorts(), tsServer.Dial)
+		openPorts = portscan.SortPorts(openPorts)
 
 		// Cache results
-		scanCacheMutex.Lock()
-		scanCache[req.Machine] = openPorts
-		scanCacheMutex.Unlock()
+		scanCache.Set(req.Machine, openPorts)
 
 		// Return JSON
 		w.Header().Set("Content-Type", "application/json")
@@ -248,8 +311,50 @@ func handleScanAPI(s *tsnet.Server, baseDomain string) http.HandlerFunc {
 	}
 }
 
-func serveDashboard(w http.ResponseWriter, r *http.Request, s *tsnet.Server, baseDomain string) {
-	lc, err := s.LocalClient()
+// ServeDashboard renders the main dashboard page.
+func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog) {
+	// Try to get baseDomain early - may be available from cached state even before fully connected
+	baseDomain := tsServer.BaseDomain()
+
+	// Check for tsnet connection error first (non-blocking)
+	select {
+	case err := <-TsnetErrorCh:
+		log.Printf("dashboard: got error from TsnetErrorCh: %v", err)
+		// Put it back so subsequent calls also see it
+		TsnetErrorCh <- err
+		showErrorPage(w, err.Error())
+		return
+	default:
+	}
+
+	// Check if login is needed (non-blocking)
+	select {
+	case authURL := <-TsnetAuthURLCh:
+		// Put it back so subsequent calls also see it
+		TsnetAuthURLCh <- authURL
+		showLoginPage(w, authURL)
+		return
+	default:
+	}
+
+	// Check if tsnet is ready (non-blocking)
+	select {
+	case <-TsnetReadyCh:
+		// Ready, continue
+	default:
+		// Not ready yet - check if it's taking too long
+		select {
+		case <-TsnetSlowCh:
+			// Taking too long, show slow connection page
+			showSlowConnectionPage(w, baseDomain)
+		default:
+			// Still within normal time, show loading page
+			showLoadingPage(w, baseDomain)
+		}
+		return
+	}
+
+	lc, err := tsServer.LocalClient()
 	if err != nil {
 		log.Printf("dashboard: failed to get local client: %v", err)
 		showLoadingPage(w, baseDomain)
@@ -264,16 +369,49 @@ func serveDashboard(w http.ResponseWriter, r *http.Request, s *tsnet.Server, bas
 		return
 	}
 
-	// If no peers are found, tsnet is probably still connecting
-	if len(status.Peer) == 0 {
-		log.Printf("dashboard: no peers found yet, showing loading page")
-		showLoadingPage(w, baseDomain)
-		return
+	// Parse host and port from socksAddr
+	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+
+	// Get connections
+	recent, live := connLog.GetRecent(20)
+	connections := make([]connectionView, 0, len(live)+len(recent))
+	for _, c := range live {
+		connections = append(connections, connectionView{
+			Host:      c.Host,
+			Port:      c.Port,
+			StartTime: c.StartTime,
+			BytesSent: c.BytesSent,
+			BytesRecv: c.BytesRecv,
+			Active:    true,
+		})
+	}
+	for _, c := range recent {
+		connections = append(connections, connectionView{
+			Host:      c.Host,
+			Port:      c.Port,
+			StartTime: c.StartTime,
+			EndTime:   c.EndTime,
+			BytesSent: c.BytesSent,
+			BytesRecv: c.BytesRecv,
+			Error:     c.Error,
+		})
+	}
+
+	// Get our hostname from status
+	hostname := ""
+	if status.Self != nil {
+		hostname = status.Self.HostName
 	}
 
 	data := dashboardData{
-		BaseDomain: baseDomain,
-		Machines:   []machineView{},
+		BaseDomain:  baseDomain,
+		Hostname:    hostname,
+		SocksAddr:   socksAddr,
+		SocksHost:   socksHost,
+		SocksPort:   socksPort,
+		PACFileURL:  pac.URLPath,
+		Machines:    []machineView{},
+		Connections: connections,
 	}
 
 	for _, peer := range status.Peer {
@@ -341,72 +479,18 @@ func formatIPs(ips []netip.Addr) []string {
 	return result
 }
 
-func findCachedPorts(dnsName string, hostName string, machineName string) ([]portInfo, bool) {
-	scanCacheMutex.RLock()
-	defer scanCacheMutex.RUnlock()
-
-	if services, ok := scanCache[dnsName]; ok {
-		return sortPorts(services), true
-	}
-	if services, ok := scanCache[hostName]; ok {
-		return sortPorts(services), true
-	}
-	if services, ok := scanCache[machineName]; ok {
-		return sortPorts(services), true
-	}
-
-	return nil, false
-}
-
-func startScan(machine string) {
-	scanStateMutex.Lock()
-	scanState[machine] = scanState[machine] + 1
-	scanStateMutex.Unlock()
-}
-
-func finishScan(machine string) {
-	scanStateMutex.Lock()
-	if count, ok := scanState[machine]; ok {
-		if count <= 1 {
-			delete(scanState, machine)
-		} else {
-			scanState[machine] = count - 1
-		}
-	}
-	scanStateMutex.Unlock()
+func findCachedPorts(dnsName string, hostName string, machineName string) ([]portscan.PortInfo, bool) {
+	return scanCache.Get(dnsName, hostName, machineName)
 }
 
 func findScanState(dnsName string, hostName string, machineName string) bool {
-	scanStateMutex.RLock()
-	defer scanStateMutex.RUnlock()
-
-	if count, ok := scanState[dnsName]; ok && count > 0 {
-		return true
-	}
-	if count, ok := scanState[hostName]; ok && count > 0 {
-		return true
-	}
-	if count, ok := scanState[machineName]; ok && count > 0 {
-		return true
-	}
-
-	return false
-}
-
-func sortPorts(ports []portInfo) []portInfo {
-	if len(ports) == 0 {
-		return nil
-	}
-
-	sorted := make([]portInfo, len(ports))
-	copy(sorted, ports)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Port < sorted[j].Port
-	})
-	return sorted
+	return scanCache.IsScanning(dnsName, hostName, machineName)
 }
 
 func showLoadingPage(w http.ResponseWriter, baseDomain string) {
+	if baseDomain == "" {
+		baseDomain = "Tailscale"
+	}
 	data := struct {
 		BaseDomain string
 	}{
@@ -415,6 +499,51 @@ func showLoadingPage(w http.ResponseWriter, baseDomain string) {
 
 	if err := renderTemplate(w, "loading.html", data); err != nil {
 		log.Printf("dashboard: failed to render loading template: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func showErrorPage(w http.ResponseWriter, errMsg string) {
+	data := struct {
+		Error string
+	}{
+		Error: errMsg,
+	}
+
+	if err := renderTemplate(w, "error.html", data); err != nil {
+		log.Printf("dashboard: failed to render error template: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func showSlowConnectionPage(w http.ResponseWriter, baseDomain string) {
+	if baseDomain == "" {
+		baseDomain = "Tailscale"
+	}
+	data := struct {
+		BaseDomain string
+	}{
+		BaseDomain: baseDomain,
+	}
+
+	if err := renderTemplate(w, "slow.html", data); err != nil {
+		log.Printf("dashboard: failed to render slow template: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func showLoginPage(w http.ResponseWriter, authURL string) {
+	data := struct {
+		AuthURL string
+	}{
+		AuthURL: authURL,
+	}
+
+	if err := renderTemplate(w, "login.html", data); err != nil {
+		log.Printf("dashboard: failed to render login template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
