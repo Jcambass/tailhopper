@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tailhopper Dashboard</title>
+  <link rel="stylesheet" href="/static/ui.css">
+  <script src="/static/ui.js" defer></script>
+</head>
+<body>
+  <div class="dashboard-header">
+    <svg class="hopper-icon" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bodyGradStatic" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" style="stop-color:#7CB342;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#558B2F;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      
+      <!-- Tail -->
+      <path d="M 50 85 Q 55 100 50 115" stroke="#9CCC65" stroke-width="4" fill="none" stroke-linecap="round" />
+      
+      <!-- Main body (rounded) -->
+      <ellipse cx="50" cy="55" rx="22" ry="28" fill="url(#bodyGradStatic)" />
+      
+      <!-- Head -->
+      <circle cx="50" cy="25" r="18" fill="#9CCC65" />
+      
+      <!-- Left eye -->
+      <circle cx="40" cy="20" r="5" fill="#fff" />
+      <circle cx="40" cy="20" r="3" fill="#2E7D32" />
+      <circle cx="41" cy="19" r="1" fill="#fff" />
+      
+      <!-- Right eye -->
+      <circle cx="60" cy="20" r="5" fill="#fff" />
+      <circle cx="60" cy="20" r="3" fill="#2E7D32" />
+      <circle cx="61" cy="19" r="1" fill="#fff" />
+      
+      <!-- Smile -->
+      <path d="M 45 28 Q 50 32 55 28" stroke="#558B2F" stroke-width="1.5" fill="none" stroke-linecap="round" />
+      
+      <!-- Left antenna -->
+      <path d="M 38 10 Q 28 5 25 2" stroke="#558B2F" stroke-width="2.5" fill="none" stroke-linecap="round" />
+      <circle cx="25" cy="2" r="2" fill="#558B2F" />
+      
+      <!-- Right antenna -->
+      <path d="M 62 10 Q 72 5 75 2" stroke="#558B2F" stroke-width="2.5" fill="none" stroke-linecap="round" />
+      <circle cx="75" cy="2" r="2" fill="#558B2F" />
+      
+      <!-- Belly patch -->
+      <ellipse cx="50" cy="60" rx="14" ry="18" fill="#AED581" opacity="0.4" />
+      
+      <!-- Front legs (stationary) -->
+      <g class="legs">
+        <ellipse cx="32" cy="70" rx="3" ry="14" fill="#558B2F" rx="3" ry="14" transform="rotate(-25 32 70)" />
+        <ellipse cx="68" cy="70" rx="3" ry="14" fill="#558B2F" rx="3" ry="14" transform="rotate(25 68 70)" />
+      </g>
+      
+      <!-- Back legs (animated on hover) -->
+      <g class="back-legs">
+        <g class="back-leg left">
+          <ellipse cx="28" cy="82" rx="3" ry="16" fill="#558B2F" transform="rotate(-35 28 82)" />
+        </g>
+        <g class="back-leg right">
+          <ellipse cx="72" cy="82" rx="3" ry="16" fill="#558B2F" transform="rotate(35 72 82)" />
+        </g>
+      </g>
+    </svg>
+    <h1>Tailhopper Dashboard</h1>
+  </div>
+  <h2 class="machines-title">Available Machines <span class="tailnet-tag">{{.BaseDomain}}</span></h2>
+
+  {{range .Machines}}
+  <div class="machine" data-machine="{{.Name}}">
+    <div class="machine-header">
+      <div>
+        <div class="machine-name">{{.Name}} <span class="{{.StatusClass}}">({{.StatusText}})</span></div>
+        <div class="machine-dns">{{.DNSName}}</div>
+      </div>
+      <button class="scan-button" onclick="scanMachine('{{.Name}}', this)" {{if or .Scanning (eq .StatusText "offline")}}disabled{{end}}>
+        {{if .Scanning}}Scanning...{{else}}Scan For Ports{{end}}
+      </button>
+    </div>
+
+    <div id="ports-{{.Name}}" class="ports-container">
+      {{$machine := .}}
+      {{if .Scanned}}
+      <div class="ports-list">
+        {{if .CachedPorts}}
+        {{range $i, $p := .CachedPorts}}
+        <label class="port-option"><input type="radio" name="port-choose-{{$machine.Name}}" value="{{$p.Port}}" {{if eq $i 0}}checked{{end}} onchange="updateConnectState('{{$machine.Name}}')">{{$p.Port}}</label>
+        {{end}}
+        {{else}}
+        <span class="ports-empty">No open ports found</span>
+        {{end}}
+        <label class="port-option">
+          <input type="radio" name="port-choose-{{$machine.Name}}" value="other" {{if not .HasPorts}}checked{{end}} onchange="updateConnectState('{{$machine.Name}}')">Other
+          <input type="number" id="other-port-{{$machine.Name}}" min="1" max="65535" placeholder="e.g., 3000" onfocus="selectOther('{{$machine.Name}}')" oninput="updateConnectState('{{$machine.Name}}')" onkeypress="handleKeyPress(event, '{{$machine.Name}}')">
+        </label>
+      </div>
+      {{else}}
+      <span class="ports-empty">No ports scanned yet</span>
+      {{end}}
+    </div>
+
+    <div class="controls-row {{if not .Scanned}}hidden{{end}}" id="controls-{{.Name}}">
+      <label class="scheme-toggle">
+        <span class="scheme-label">HTTP</span>
+        <input type="checkbox" id="https-{{.Name}}" {{if .DefaultHTTPS}}checked{{end}}>
+        <span class="scheme-slider"></span>
+        <span class="scheme-label">HTTPS</span>
+      </label>
+      <button id="connect-{{.Name}}" onclick="connectSelected('{{.Name}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
+        Connect
+        <span class="connect-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true">
+            <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"></path>
+            <path d="M5 5h6v2H7v10h10v-4h2v6H5V5z"></path>
+          </svg>
+        </span>
+      </button>
+    </div>
+
+    <div class="machine-addrs">IPs: {{.IPs}}</div>
+  </div>
+  {{end}}
+</body>
+</html>
