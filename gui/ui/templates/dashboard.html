@@ -133,31 +133,31 @@
 
   {{if .Machines}}
   {{range .Machines}}
-  <div class="machine" data-machine="{{.Name}}">
+  <div class="machine" data-machine="{{.DNSName}}">
     <div class="machine-header">
       <div>
         <div class="machine-name">{{.Name}} <span class="{{.StatusClass}}">({{.StatusText}})</span></div>
         <div class="machine-dns">{{.DNSName}}</div>
       </div>
-      <button class="scan-button" onclick="scanMachine('{{.Name}}', this)" {{if or .Scanning (eq .StatusText "offline")}}disabled{{end}}>
+      <button class="scan-button" onclick="scanMachine('{{.DNSName}}', this)" {{if or .Scanning (eq .StatusText "offline")}}disabled{{end}}>
         {{if .Scanning}}Scanning...{{else}}Scan For Ports{{end}}
       </button>
     </div>
 
-    <div id="ports-{{.Name}}" class="ports-container">
+    <div id="ports-{{.DNSName}}" class="ports-container">
       {{$machine := .}}
       {{if .Scanned}}
       <div class="ports-list">
         {{if .CachedPorts}}
         {{range $i, $p := .CachedPorts}}
-        <label class="port-option"><input type="radio" name="port-choose-{{$machine.Name}}" value="{{$p.Port}}" {{if eq $i 0}}checked{{end}} onchange="updateConnectState('{{$machine.Name}}')">{{$p.Port}}</label>
+        <label class="port-option"><input type="radio" name="port-choose-{{$machine.DNSName}}" value="{{$p}}" {{if eq $i 0}}checked{{end}} onchange="updateConnectState('{{$machine.DNSName}}')">{{$p}}</label>
         {{end}}
         {{else}}
         <span class="ports-empty">No open ports found</span>
         {{end}}
         <label class="port-option">
-          <input type="radio" name="port-choose-{{$machine.Name}}" value="other" {{if not .HasPorts}}checked{{end}} onchange="updateConnectState('{{$machine.Name}}')">Other
-          <input type="number" id="other-port-{{$machine.Name}}" min="1" max="65535" placeholder="e.g., 3000" onfocus="selectOther('{{$machine.Name}}')" oninput="updateConnectState('{{$machine.Name}}')" onkeypress="handleKeyPress(event, '{{$machine.Name}}')">
+          <input type="radio" name="port-choose-{{$machine.DNSName}}" value="other" {{if not .HasPorts}}checked{{end}} onchange="updateConnectState('{{$machine.DNSName}}')">Other
+          <input type="number" id="other-port-{{$machine.DNSName}}" min="1" max="65535" placeholder="e.g., 3000" onfocus="selectOther('{{$machine.DNSName}}')" oninput="updateConnectState('{{$machine.DNSName}}')" onkeypress="handleKeyPress(event, '{{$machine.DNSName}}')">
         </label>
       </div>
       {{else}}
@@ -165,14 +165,14 @@
       {{end}}
     </div>
 
-    <div class="controls-row {{if not .Scanned}}hidden{{end}}" id="controls-{{.Name}}">
+    <div class="controls-row {{if not .Scanned}}hidden{{end}}" id="controls-{{.DNSName}}">
       <label class="scheme-toggle">
         <span class="scheme-label">HTTP</span>
-        <input type="checkbox" id="https-{{.Name}}" {{if .DefaultHTTPS}}checked{{end}}>
+        <input type="checkbox" id="https-{{.DNSName}}" {{if .DefaultHTTPS}}checked{{end}}>
         <span class="scheme-slider"></span>
         <span class="scheme-label">HTTPS</span>
       </label>
-      <button id="connect-{{.Name}}" onclick="connectSelected('{{.Name}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
+      <button id="connect-{{.DNSName}}" onclick="connectSelected('{{.DNSName}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
         Open
         <span class="connect-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true">

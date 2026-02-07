@@ -23,9 +23,6 @@ import (
 )
 
 var (
-	// Scan cache for port scanning results
-	scanCache = portscan.NewCache()
-
 	// Channel for tsnet connection error (buffered so send doesn't block)
 	TsnetErrorCh = make(chan error, 1)
 	// Channel that gets closed when tsnet is ready
@@ -112,7 +109,7 @@ type machineView struct {
 	StatusClass  string
 	StatusText   string
 	IPs          string
-	CachedPorts  []portscan.PortInfo
+	CachedPorts  []int
 	Scanned      bool
 	DefaultHTTPS bool
 	HasPorts     bool
@@ -225,7 +222,7 @@ func HandleMachinesAPI(tsServer *ts.Server) http.HandlerFunc {
 		}
 
 		sort.Slice(machines, func(i, j int) bool {
-			return strings.ToLower(machines[i].Name) < strings.ToLower(machines[j].Name)
+			return strings.ToLower(machines[i].DNSName) < strings.ToLower(machines[j].DNSName)
 		})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -234,7 +231,7 @@ func HandleMachinesAPI(tsServer *ts.Server) http.HandlerFunc {
 }
 
 // HandleScanAPI returns a handler for the port scanning API endpoint.
-func HandleScanAPI(tsServer *ts.Server) http.HandlerFunc {
+func HandleScanAPI(tsServer *ts.Server, scanner *portscan.Scanner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -249,61 +246,19 @@ func HandleScanAPI(tsServer *ts.Server) http.HandlerFunc {
 			return
 		}
 
-		baseDomain := tsServer.BaseDomain()
-
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		localClient, err := tsServer.LocalClient()
-		if err != nil {
-			http.Error(w, "failed to get client", http.StatusInternalServerError)
-			return
-		}
-
-		status, err := localClient.Status(ctx)
-		if err != nil {
-			http.Error(w, "failed to get status", http.StatusInternalServerError)
-			return
-		}
-
-		// Find the machine
-		var targetIP string
-		for _, peer := range status.Peer {
-			peerName := peer.HostName
-			dns := strings.TrimSuffix(peer.DNSName, ".")
-			dns = strings.TrimSuffix(dns, "."+baseDomain)
-
-			if peerName == req.Machine || dns == req.Machine {
-				if len(peer.TailscaleIPs) > 0 {
-					targetIP = peer.TailscaleIPs[0].String()
-				}
-				break
-			}
-		}
-
-		if targetIP == "" {
-			http.Error(w, "machine not found", http.StatusNotFound)
-			return
-		}
-
-		scanCache.StartScan(req.Machine)
-		defer scanCache.FinishScan(req.Machine)
+		fmt.Printf("Received scan request for machine: %s\n", req.Machine)
 
 		// Scan just this machine using Tailscale dialer
 		scanCtx, scanCancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer scanCancel()
 
-		openPorts := portscan.ScanHost(scanCtx, targetIP, portscan.CommonHTTPPorts(), tsServer.Dial)
-		openPorts = portscan.SortPorts(openPorts)
-
-		// Cache results
-		scanCache.Set(req.Machine, openPorts)
+		openPorts := scanner.Scan(scanCtx, req.Machine)
 
 		// Return JSON
 		w.Header().Set("Content-Type", "application/json")
 		portNums := make([]int, len(openPorts))
 		for i, p := range openPorts {
-			portNums[i] = int(p.Port)
+			portNums[i] = int(p)
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ports": portNums,
@@ -312,7 +267,7 @@ func HandleScanAPI(tsServer *ts.Server) http.HandlerFunc {
 }
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog, scanner *portscan.Scanner) {
 	// Try to get baseDomain early - may be available from cached state even before fully connected
 	baseDomain := tsServer.BaseDomain()
 
@@ -436,12 +391,13 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 			statusText = "online"
 		}
 
-		cachedPorts, scanned := findCachedPorts(peer.DNSName, peer.HostName, machineName)
-		scanning := findScanState(peer.DNSName, peer.HostName, machineName)
+		cachedPorts, scanned := scanner.GetCachedResults(peer.DNSName)
+		scanning := scanner.IsScanning(peer.DNSName)
+
 		hasPorts := len(cachedPorts) > 0
 		defaultHTTPS := false
 		if hasPorts {
-			if cachedPorts[0].Port == 443 || cachedPorts[0].Port == 8448 {
+			if cachedPorts[0] == 443 || cachedPorts[0] == 8448 {
 				defaultHTTPS = true
 			}
 		}
@@ -461,7 +417,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	}
 
 	sort.Slice(data.Machines, func(i, j int) bool {
-		return strings.ToLower(data.Machines[i].Name) < strings.ToLower(data.Machines[j].Name)
+		return strings.ToLower(data.Machines[i].DNSName) < strings.ToLower(data.Machines[j].DNSName)
 	})
 
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
@@ -477,14 +433,6 @@ func formatIPs(ips []netip.Addr) []string {
 		result[i] = ip.String()
 	}
 	return result
-}
-
-func findCachedPorts(dnsName string, hostName string, machineName string) ([]portscan.PortInfo, bool) {
-	return scanCache.Get(dnsName, hostName, machineName)
-}
-
-func findScanState(dnsName string, hostName string, machineName string) bool {
-	return scanCache.IsScanning(dnsName, hostName, machineName)
 }
 
 func showLoadingPage(w http.ResponseWriter, baseDomain string) {

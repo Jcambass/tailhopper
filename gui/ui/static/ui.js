@@ -165,10 +165,8 @@ function connectSelected(machine) {
     return;
   }
 
-  // Get the machine's DNS name from the DOM
-  var machineEl = document.querySelector('.machine[data-machine="' + machine + '"]');
-  var dnsEl = machineEl ? machineEl.querySelector('.machine-dns') : null;
-  var dnsName = dnsEl ? dnsEl.textContent.trim() : machine;
+  // machine is now the DNS name from data-machine attribute
+  var dnsName = machine;
   
   // Remove trailing dot if present
   if (dnsName.endsWith('.')) {
@@ -257,18 +255,18 @@ function refreshMachines() {
     .then(function(machines) {
       var existingMachines = {};
       document.querySelectorAll('.machine').forEach(function(el) {
-        var name = el.getAttribute('data-machine');
-        if (name) existingMachines[name] = el;
+        var dnsName = el.getAttribute('data-machine');
+        if (dnsName) existingMachines[dnsName] = el;
       });
 
-      var newMachineNames = {};
+      var newMachineDNSNames = {};
       machines.forEach(function(m) {
-        newMachineNames[m.Name] = true;
+        newMachineDNSNames[m.DNSName] = true;
 
-        if (existingMachines[m.Name]) {
+        if (existingMachines[m.DNSName]) {
           // Update existing machine - only update status if not being interacted with
-          if (!isMachineActive(m.Name)) {
-            var el = existingMachines[m.Name];
+          if (!isMachineActive(m.DNSName)) {
+            var el = existingMachines[m.DNSName];
             // Update online/offline status
             var statusSpan = el.querySelector('.machine-name span');
             if (statusSpan) {
@@ -288,9 +286,9 @@ function refreshMachines() {
       });
 
       // Remove machines that no longer exist
-      Object.keys(existingMachines).forEach(function(name) {
-        if (!newMachineNames[name] && !isMachineActive(name)) {
-          existingMachines[name].remove();
+      Object.keys(existingMachines).forEach(function(dnsName) {
+        if (!newMachineDNSNames[dnsName] && !isMachineActive(dnsName)) {
+          existingMachines[dnsName].remove();
         }
       });
 
@@ -325,25 +323,25 @@ function addNewMachine(m) {
   var machinesTitle = document.querySelector('.machines-title');
   if (!machinesTitle) return;
 
-  var html = '<div class="machine" data-machine="' + escapeHtml(m.Name) + '">' +
+  var html = '<div class="machine" data-machine="' + escapeHtml(m.DNSName) + '">' +
     '<div class="machine-header">' +
     '<div>' +
     '<div class="machine-name">' + escapeHtml(m.Name) + ' <span class="' + m.StatusClass + '">(' + m.StatusText + ')</span></div>' +
     '<div class="machine-dns">' + escapeHtml(m.DNSName) + '</div>' +
     '</div>' +
-    '<button class="scan-button" onclick="scanMachine(\'' + escapeHtml(m.Name) + '\', this)">Scan For Ports</button>' +
+    '<button class="scan-button" onclick="scanMachine(\'' + escapeHtml(m.DNSName) + '\', this)">Scan For Ports</button>' +
     '</div>' +
-    '<div id="ports-' + escapeHtml(m.Name) + '" class="ports-container">' +
+    '<div id="ports-' + escapeHtml(m.DNSName) + '" class="ports-container">' +
     '<span class="ports-empty">No ports scanned yet</span>' +
     '</div>' +
-    '<div class="controls-row hidden" id="controls-' + escapeHtml(m.Name) + '">' +
+    '<div class="controls-row hidden" id="controls-' + escapeHtml(m.DNSName) + '">' +
     '<label class="scheme-toggle">' +
     '<span class="scheme-label">HTTP</span>' +
-    '<input type="checkbox" id="https-' + escapeHtml(m.Name) + '">' +
+    '<input type="checkbox" id="https-' + escapeHtml(m.DNSName) + '">' +
     '<span class="scheme-slider"></span>' +
     '<span class="scheme-label">HTTPS</span>' +
     '</label>' +
-    '<button id="connect-' + escapeHtml(m.Name) + '" onclick="connectSelected(\'' + escapeHtml(m.Name) + '\')" disabled>' +
+    '<button id="connect-' + escapeHtml(m.DNSName) + '" onclick="connectSelected(\'' + escapeHtml(m.DNSName) + '\')" disabled>' +
     'Open <span class="connect-icon" aria-hidden="true"><svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true"><path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"></path><path d="M5 5h6v2H7v10h10v-4h2v6H5V5z"></path></svg></span>' +
     '</button>' +
     '</div>' +
@@ -355,7 +353,7 @@ function addNewMachine(m) {
   var allMachines = document.querySelectorAll('.machine');
   for (var i = 0; i < allMachines.length; i++) {
     var existingName = allMachines[i].getAttribute('data-machine');
-    if (existingName && m.Name.toLowerCase() < existingName.toLowerCase()) {
+    if (existingName && m.DNSName.toLowerCase() < existingName.toLowerCase()) {
       allMachines[i].insertAdjacentHTML('beforebegin', html);
       inserted = true;
       break;
