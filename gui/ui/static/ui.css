@@ -385,17 +385,29 @@ h1 { color: #333; }
 }
 
 .copy-btn {
-  padding: 4px 10px;
+  padding: 6px;
   background: #0066cc;
   color: white;
   border: none;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 0.8em;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.copy-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.copy-btn .icon-check { display: none; }
+.copy-btn.copied .icon-copy { display: none; }
+.copy-btn.copied .icon-check { display: block; }
+.copy-btn.copied { background: #28a745; }
+
 .copy-btn:hover { background: #0052a3; }
+.copy-btn.copied:hover { background: #28a745; }
 
 .setup-note {
   font-size: 0.85em !important;

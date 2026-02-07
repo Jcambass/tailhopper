@@ -4,13 +4,12 @@ function copyToClipboard(elementId) {
   
   var text = el.textContent || el.innerText;
   navigator.clipboard.writeText(text).then(function() {
-    // Show brief feedback
-    var btn = el.nextElementSibling;
-    if (btn && btn.classList.contains('copy-btn')) {
-      var originalText = btn.textContent;
-      btn.textContent = 'Copied!';
+    // Show brief feedback by swapping icons
+    var btn = el.closest('.code-block').querySelector('.copy-btn');
+    if (btn) {
+      btn.classList.add('copied');
       setTimeout(function() {
-        btn.textContent = originalText;
+        btn.classList.remove('copied');
       }, 1500);
     }
   }).catch(function(err) {
