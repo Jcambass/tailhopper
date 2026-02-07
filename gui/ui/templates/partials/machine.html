@@ -1,0 +1,61 @@
+{{define "machine"}}
+<div class="machine" data-machine="{{.Name}}" data-dnsname="{{.DNSName}}">
+  <div class="machine-header">
+    <div>
+      <div class="machine-name">{{.Name}} <span class="{{.StatusClass}}">({{.StatusText}})</span></div>
+      <div class="machine-dns">{{.DNSName}}</div>
+    </div>
+    <button class="scan-button"
+            hx-post="/partials/scan/{{.Name}}"
+            hx-target="closest .machine"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            hx-indicator="this"
+            {{if or .Scanning (eq .StatusText "offline")}}disabled{{end}}>
+      <span class="scan-text">{{if .Scanning}}Scanning...{{else}}Scan For Ports{{end}}</span>
+      <span class="scan-loading">Scanning...</span>
+    </button>
+  </div>
+
+  <div class="ports-container">
+    {{if .Scanned}}
+    <div class="ports-list">
+      {{if .CachedPorts}}
+      {{$machine := .}}
+      {{range $i, $p := .CachedPorts}}
+      <label class="port-option"><input type="radio" name="port-choose-{{$machine.Name}}" value="{{$p}}" {{if eq $i 0}}checked{{end}} onchange="updateConnectState('{{$machine.Name}}')">{{$p}}</label>
+      {{end}}
+      {{else}}
+      <span class="ports-empty">No open ports found</span>
+      {{end}}
+      <label class="port-option">
+        <input type="radio" name="port-choose-{{.Name}}" value="other" {{if not .HasPorts}}checked{{end}} onchange="updateConnectState('{{.Name}}')">Other
+        <input type="number" data-other-port="{{.Name}}" min="1" max="65535" placeholder="e.g., 3000" onfocus="selectOther('{{.Name}}')" oninput="updateConnectState('{{.Name}}')" onkeypress="handleKeyPress(event, '{{.Name}}')">
+      </label>
+    </div>
+    {{else}}
+    <span class="ports-empty">No ports scanned yet</span>
+    {{end}}
+  </div>
+
+  <div class="controls-row {{if not .Scanned}}hidden{{end}}" data-controls="{{.Name}}">
+    <label class="scheme-toggle">
+      <span class="scheme-label">HTTP</span>
+      <input type="checkbox" data-https="{{.Name}}" {{if .DefaultHTTPS}}checked{{end}}>
+      <span class="scheme-slider"></span>
+      <span class="scheme-label">HTTPS</span>
+    </label>
+    <button data-connect="{{.Name}}" onclick="connectSelected('{{.Name}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
+      Open
+      <span class="connect-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true">
+          <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"></path>
+          <path d="M5 5h6v2H7v10h10v-4h2v6H5V5z"></path>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <div class="machine-addrs">IPs: {{.IPs}}</div>
+</div>
+{{end}}

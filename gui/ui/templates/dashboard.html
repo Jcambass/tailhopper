@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tailhopper Dashboard</title>
   <link rel="stylesheet" href="/static/ui.css">
+  <script src="/static/htmx.min.js"></script>
   <script src="/static/ui.js" defer></script>
 </head>
 <body>
@@ -101,96 +102,21 @@
   <!-- Recent Connections Section -->
   <div class="connections-section">
     <h2>📡 Recent Connections</h2>
-    <div id="connections-list" class="connections-list">
-      {{if .Connections}}
-      <table class="connections-table">
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Target</th>
-            <th>Duration</th>
-            <th>Data</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Connections}}
-          <tr class="{{if .Active}}active{{else if .Error}}error{{end}}">
-            <td>{{if .Active}}<span class="status-dot active"></span>{{else if .Error}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}</td>
-            <td class="target">{{.Host}}:{{.Port}}</td>
-            <td class="duration">{{if .Active}}ongoing{{else}}{{formatDuration .StartTime .EndTime}}{{end}}</td>
-            <td class="data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-      {{else}}
-      <p class="no-connections">No connections yet. Configure your browser with the PAC file above to get started.</p>
-      {{end}}
+    <div id="connections-list" class="connections-list"
+         hx-get="/partials/connections"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {{template "connections" .Connections}}
     </div>
   </div>
 
   <h2 class="machines-title">Available Machines <span class="tailnet-tag">{{.BaseDomain}}</span></h2>
 
-  {{if .Machines}}
-  {{range .Machines}}
-  <div class="machine" data-machine="{{.DNSName}}">
-    <div class="machine-header">
-      <div>
-        <div class="machine-name">{{.Name}} <span class="{{.StatusClass}}">({{.StatusText}})</span></div>
-        <div class="machine-dns">{{.DNSName}}</div>
-      </div>
-      <button class="scan-button" onclick="scanMachine('{{.DNSName}}', this)" {{if or .Scanning (eq .StatusText "offline")}}disabled{{end}}>
-        {{if .Scanning}}Scanning...{{else}}Scan For Ports{{end}}
-      </button>
-    </div>
-
-    <div id="ports-{{.DNSName}}" class="ports-container">
-      {{$machine := .}}
-      {{if .Scanned}}
-      <div class="ports-list">
-        {{if .CachedPorts}}
-        {{range $i, $p := .CachedPorts}}
-        <label class="port-option"><input type="radio" name="port-choose-{{$machine.DNSName}}" value="{{$p}}" {{if eq $i 0}}checked{{end}} onchange="updateConnectState('{{$machine.DNSName}}')">{{$p}}</label>
-        {{end}}
-        {{else}}
-        <span class="ports-empty">No open ports found</span>
-        {{end}}
-        <label class="port-option">
-          <input type="radio" name="port-choose-{{$machine.DNSName}}" value="other" {{if not .HasPorts}}checked{{end}} onchange="updateConnectState('{{$machine.DNSName}}')">Other
-          <input type="number" id="other-port-{{$machine.DNSName}}" min="1" max="65535" placeholder="e.g., 3000" onfocus="selectOther('{{$machine.DNSName}}')" oninput="updateConnectState('{{$machine.DNSName}}')" onkeypress="handleKeyPress(event, '{{$machine.DNSName}}')">
-        </label>
-      </div>
-      {{else}}
-      <span class="ports-empty">No ports scanned yet</span>
-      {{end}}
-    </div>
-
-    <div class="controls-row {{if not .Scanned}}hidden{{end}}" id="controls-{{.DNSName}}">
-      <label class="scheme-toggle">
-        <span class="scheme-label">HTTP</span>
-        <input type="checkbox" id="https-{{.DNSName}}" {{if .DefaultHTTPS}}checked{{end}}>
-        <span class="scheme-slider"></span>
-        <span class="scheme-label">HTTPS</span>
-      </label>
-      <button id="connect-{{.DNSName}}" onclick="connectSelected('{{.DNSName}}')" {{if and .Scanned (not .HasPorts)}}disabled{{end}}>
-        Open
-        <span class="connect-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" class="connect-icon-svg" focusable="false" aria-hidden="true">
-            <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3z"></path>
-            <path d="M5 5h6v2H7v10h10v-4h2v6H5V5z"></path>
-          </svg>
-        </span>
-      </button>
-    </div>
-
-    <div class="machine-addrs">IPs: {{.IPs}}</div>
+  <div id="machines-list"
+       hx-get="/partials/machines"
+       hx-trigger="every 10s"
+       hx-swap="innerHTML">
+  {{template "machines" .}}
   </div>
-  {{end}}
-  {{else}}
-  <div class="empty-state">
-    <p class="empty-state-message">No machines found on your tailnet.</p>
-    <p class="empty-state-hint">Make sure other devices are connected to your Tailscale network and that your ACLs allow <code>{{.Hostname}}</code> to see them.</p>
-  </div>
-  {{end}}
 </body>
 </html>

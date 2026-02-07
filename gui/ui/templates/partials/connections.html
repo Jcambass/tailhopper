@@ -1,0 +1,26 @@
+{{define "connections"}}
+{{if .}}
+<table class="connections-table">
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>Target</th>
+      <th>Duration</th>
+      <th>Data</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .}}
+    <tr class="{{if .Active}}active{{else if .Error}}error{{end}}">
+      <td>{{if .Active}}<span class="status-dot active"></span>{{else if .Error}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}</td>
+      <td class="target">{{.Host}}:{{.Port}}</td>
+      <td class="duration">{{if .Active}}ongoing{{else}}{{formatDuration .StartTime .EndTime}}{{end}}</td>
+      <td class="data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="no-connections">No connections yet. Configure your browser with the PAC file above to get started.</p>
+{{end}}
+{{end}}

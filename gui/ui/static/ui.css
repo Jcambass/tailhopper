@@ -89,6 +89,24 @@ h1 { color: #333; }
 
 .scan-button:hover { background: #0052a3; }
 
+/* htmx scanning indicator */
+.scan-button .scan-loading {
+  display: none;
+}
+
+.scan-button.htmx-request .scan-text {
+  display: none;
+}
+
+.scan-button.htmx-request .scan-loading {
+  display: inline;
+}
+
+.scan-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .ports-container { margin: 10px 0; }
 
 .ports-list {

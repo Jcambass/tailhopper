@@ -39,6 +39,8 @@ func (s *Scanner) Scan(ctx context.Context, host string) []int {
 		return nil // Already scanning this host
 	}
 	s.scanning[host] = true
+	// clear the cache for this host before scanning
+	delete(s.results, host)
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()

@@ -1,0 +1,12 @@
+{{define "machines"}}
+{{if .Machines}}
+{{range .Machines}}
+{{template "machine" .}}
+{{end}}
+{{else}}
+<div class="empty-state">
+  <p class="empty-state-message">No machines found on your tailnet.</p>
+  <p class="empty-state-hint">Make sure other devices are connected to your Tailscale network and that your ACLs allow <code>{{.Hostname}}</code> to see them.</p>
+</div>
+{{end}}
+{{end}}

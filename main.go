@@ -28,7 +28,7 @@ func main() {
 	// Create state channels for tsnet communication
 	stateChannels := ts.NewStateChannels()
 
-	// Export channels to gui package (for backward compatibility)
+	// Set gui package channels for dashboard state display
 	gui.TsnetErrorCh = stateChannels.ErrorCh
 	gui.TsnetReadyCh = stateChannels.ReadyCh
 	gui.TsnetSlowCh = stateChannels.SlowCh
