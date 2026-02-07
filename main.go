@@ -7,21 +7,28 @@ import (
 	"github.com/jcambass/tailhopper/socks"
 	"github.com/jcambass/tailhopper/ts"
 	"github.com/jcambass/tailhopper/web"
+	"tailscale.com/util/dnsname"
 )
 
-// TailHopper: A SOCKS5 proxy for personal Tailnet users.
+// Tailhopper: A SOCKS5 proxy for personal Tailnet users.
 // This program uses tsnet's built-in SOCKS5 proxy to route connections through your Tailnet.
 // Example usage:
-//  1. Optionally set TS_HOSTNAME to customize the Tailscale hostname (defaults to "tailhopper").
+//  1. Optionally set TS_HOSTNAME to customize the Tailscale hostname (defaults to "{hostname}-tailhopper").
 //  2. Optionally set HTTP_PORT to change the HTTP/GUI port (defaults to 8888).
-//  3. Run this program.
-//  4. On first start, view stdout for a URL to authenticate with your Tailnet.
-//  5. Configure your browser to use the PAC file at http://localhost:8888/proxy.pac
+//  3. Optionally set SOCKS_PORT to change the SOCKS5 proxy port (defaults to 1080).
+//  4. Run this program.
+//  5. On first start, view stdout for a URL to authenticate with your Tailnet.
+//  6. Configure your browser to use the PAC file at http://localhost:8888/proxy.pac
 //     Or manually set SOCKS5 proxy to the address shown on startup.
 func main() {
 	hostname := os.Getenv("TS_HOSTNAME")
 	if hostname == "" {
-		hostname = "tailhopper"
+		if realHostname, err := os.Hostname(); err == nil {
+			// Use Tailscale's hostname sanitization logic
+			hostname = dnsname.SanitizeHostname(realHostname) + "-tailhopper"
+		} else {
+			hostname = "tailhopper"
+		}
 	}
 
 	// Create Tailscale server
