@@ -15,47 +15,27 @@ import (
 
 // ServeDashboard renders the main dashboard page.
 func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog, scanner *portscan.Scanner) {
-	// Try to get baseDomain early - may be available from cached state even before fully connected
 	baseDomain := tsServer.BaseDomain()
+	state := tsServer.State().Current()
 
-	// Check for tsnet connection error first (non-blocking)
-	select {
-	case err := <-TsnetErrorCh:
-		log.Printf("dashboard: got error from TsnetErrorCh: %v", err)
-		// Put it back so subsequent calls also see it
-		TsnetErrorCh <- err
-		showErrorPage(w, err.Error())
+	// Handle non-running states
+	switch state.State {
+	case ts.StateError:
+		log.Printf("dashboard: tsnet error: %v", state.Error)
+		showErrorPage(w, state.Error.Error())
 		return
-	default:
-	}
-
-	// Check if login is needed (non-blocking)
-	select {
-	case authURL := <-TsnetAuthURLCh:
-		// Put it back so subsequent calls also see it
-		TsnetAuthURLCh <- authURL
-		showLoginPage(w, authURL)
+	case ts.StateNeedsLogin:
+		showLoginPage(w, state.AuthURL)
 		return
-	default:
-	}
-
-	// Check if tsnet is ready (non-blocking)
-	select {
-	case <-TsnetReadyCh:
-		// Ready, continue
-	default:
-		// Not ready yet - check if it's taking too long
-		select {
-		case <-TsnetSlowCh:
-			// Taking too long, show slow connection page
-			showSlowConnectionPage(w, baseDomain)
-		default:
-			// Still within normal time, show loading page
-			showLoadingPage(w, baseDomain)
-		}
+	case ts.StateConnectingSlow:
+		showSlowConnectionPage(w, baseDomain)
+		return
+	case ts.StateConnecting:
+		showLoadingPage(w, baseDomain)
 		return
 	}
 
+	// StateRunning - show dashboard
 	lc, err := tsServer.LocalClient()
 	if err != nil {
 		log.Printf("dashboard: failed to get local client: %v", err)

@@ -16,50 +16,36 @@ import (
 
 const baseDomainFile = "tailhopper-domain"
 
-// StateChannels holds channels for communicating tsnet connection state.
-type StateChannels struct {
-	// ErrorCh receives fatal errors from tsnet initialization
-	ErrorCh chan error
-	// ReadyCh is closed when tsnet is fully connected
-	ReadyCh chan struct{}
-	// SlowCh is closed when connection is taking too long
-	SlowCh chan struct{}
-	// AuthURLCh receives auth URLs when login is needed
-	AuthURLCh chan string
-}
-
-// NewStateChannels creates a new set of state channels.
-func NewStateChannels() *StateChannels {
-	return &StateChannels{
-		ErrorCh:   make(chan error, 1),
-		ReadyCh:   make(chan struct{}),
-		SlowCh:    make(chan struct{}),
-		AuthURLCh: make(chan string, 1),
-	}
-}
+// SlowTimeout is the duration after which the "still connecting" message is shown.
+const SlowTimeout = 10 * time.Second
 
 // Server wraps a tsnet.Server with state management.
 type Server struct {
 	*tsnet.Server
-	channels     *StateChannels
+	state        *StateMachine
 	stateDir     string
 	cachedDomain string
 	mu           sync.RWMutex
 }
 
 // NewServer creates a new Tailscale server.
-func NewServer(stateDir, hostname string, channels *StateChannels) *Server {
+func NewServer(stateDir, hostname string) *Server {
 	s := &Server{
 		Server: &tsnet.Server{
 			Dir:      stateDir,
 			Hostname: hostname,
 		},
-		channels: channels,
+		state:    NewStateMachine(),
 		stateDir: stateDir,
 	}
 	// Load cached domain from disk
 	s.loadCachedDomain()
 	return s
+}
+
+// State returns the state machine for observing connection state.
+func (s *Server) State() *StateMachine {
+	return s.state
 }
 
 // loadCachedDomain reads the cached base domain from disk.
@@ -100,22 +86,15 @@ func (s *Server) clearCachedDomain() {
 	log.Printf("Cleared cached domain (re-authentication required)")
 }
 
-// SlowTimeout is the duration after which the "still connecting" message is shown.
-const SlowTimeout = 10 * time.Second
-
-// startSlowTimeout closes SlowCh after the timeout if not ready.
+// startSlowTimeout triggers the ConnectingSlow state after timeout if not ready.
 func (s *Server) startSlowTimeout() {
 	go func() {
-		select {
-		case <-time.After(SlowTimeout):
-			close(s.channels.SlowCh)
-		case <-s.channels.ReadyCh:
-			// Connected before timeout, no need to show slow message
-		}
+		time.Sleep(SlowTimeout)
+		s.state.SetConnectingSlow()
 	}()
 }
 
-// startIPNWatcher watches for IPN state changes and updates channels accordingly.
+// startIPNWatcher watches for IPN state changes and updates the state machine.
 func (s *Server) startIPNWatcher() {
 	go func() {
 		// Wait a moment for tsnet to initialize
@@ -144,70 +123,48 @@ func (s *Server) startIPNWatcher() {
 			if n.State != nil {
 				state := *n.State
 				log.Printf("IPN state changed: %v", state)
-				if state == ipn.Running {
-					log.Printf("tsnet fully connected (AuthLoop running)")
-					// Update cached domain now that we're connected
+				switch state {
+				case ipn.Running:
+					log.Printf("tsnet fully connected")
 					s.updateBaseDomain()
-					// Clear auth URL if we were showing login page
-					select {
-					case <-s.channels.AuthURLCh:
-					default:
-					}
-					close(s.channels.ReadyCh)
+					s.state.SetRunning()
 					return
-				}
-				if state == ipn.NeedsLogin {
+				case ipn.NeedsLogin:
 					log.Printf("tsnet needs login")
-					// Clear cached domain since we may be switching tailnets
 					s.clearCachedDomain()
-					// Get the auth URL from the status
-					status, err := lc.Status(ctx)
-					if err == nil && status.AuthURL != "" {
+					// Get auth URL from status
+					if status, err := lc.Status(ctx); err == nil && status.AuthURL != "" {
 						log.Printf("Auth URL: %s", status.AuthURL)
-						// Clear old auth URL if any
-						select {
-						case <-s.channels.AuthURLCh:
-						default:
-						}
-						s.channels.AuthURLCh <- status.AuthURL
+						s.state.SetNeedsLogin(status.AuthURL)
 					}
 				}
 			}
 			// Also check for auth URL in BrowseToURL notifications
 			if n.BrowseToURL != nil && *n.BrowseToURL != "" {
 				log.Printf("Auth URL from notification: %s", *n.BrowseToURL)
-				// Clear old auth URL if any
-				select {
-				case <-s.channels.AuthURLCh:
-				default:
-				}
-				s.channels.AuthURLCh <- *n.BrowseToURL
+				s.state.SetNeedsLogin(*n.BrowseToURL)
 			}
 		}
 	}()
 }
 
 // Start begins the tsnet connection in the background.
-// It also starts the slow timeout and IPN watcher.
 func (s *Server) Start() {
 	s.startSlowTimeout()
 	s.startIPNWatcher()
 
 	go func() {
-		// Use background context - tsnet will keep retrying and recover on its own
 		if _, err := s.Up(context.Background()); err != nil {
 			log.Printf("tsnet error: %v", err)
-			s.channels.ErrorCh <- err
+			s.state.SetError(err)
 			return
 		}
-		// IPN watcher will close ReadyCh when state reaches Running
+		// IPN watcher will set Running state when tsnet is fully connected
 	}()
 }
 
 // BaseDomain returns the Tailnet base domain (e.g., "tail1234.ts.net").
-// Returns cached value if available, otherwise queries the status.
 func (s *Server) BaseDomain() string {
-	// First check cache
 	s.mu.RLock()
 	cached := s.cachedDomain
 	s.mu.RUnlock()
@@ -215,7 +172,6 @@ func (s *Server) BaseDomain() string {
 		return cached
 	}
 
-	// Try to get from status
 	domain := s.fetchBaseDomain()
 	if domain != "" {
 		s.saveCachedDomain(domain)
@@ -235,7 +191,6 @@ func (s *Server) fetchBaseDomain() string {
 		return ""
 	}
 
-	// Try CurrentTailnet.MagicDNSSuffix (available when connected)
 	if status.CurrentTailnet != nil && status.CurrentTailnet.MagicDNSSuffix != "" {
 		return strings.TrimSuffix(status.CurrentTailnet.MagicDNSSuffix, ".")
 	}

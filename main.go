@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/jcambass/tailhopper/gui"
 	"github.com/jcambass/tailhopper/socks"
 	"github.com/jcambass/tailhopper/ts"
 	"github.com/jcambass/tailhopper/web"
@@ -25,17 +24,8 @@ func main() {
 		hostname = "tailhopper"
 	}
 
-	// Create state channels for tsnet communication
-	stateChannels := ts.NewStateChannels()
-
-	// Set gui package channels for dashboard state display
-	gui.TsnetErrorCh = stateChannels.ErrorCh
-	gui.TsnetReadyCh = stateChannels.ReadyCh
-	gui.TsnetSlowCh = stateChannels.SlowCh
-	gui.TsnetAuthURLCh = stateChannels.AuthURLCh
-
 	// Create Tailscale server
-	tsServer := ts.NewServer("./tsnet-state", hostname, stateChannels)
+	tsServer := ts.NewServer("./tsnet-state", hostname)
 	defer tsServer.Close()
 
 	// Start SOCKS5 proxy
@@ -63,7 +53,7 @@ func main() {
 	// Create HTTP server
 	httpSrv := web.NewServer(httpAddr, tsServer, socksAddr, socksServer.ConnLog)
 
-	// Start and watch tsnet connection
+	// Start tsnet connection
 	tsServer.Start()
 
 	if err := httpSrv.Start(); err != nil {

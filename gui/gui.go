@@ -12,17 +12,6 @@ import (
 	"time"
 )
 
-var (
-	// TsnetErrorCh receives tsnet connection errors (buffered so send doesn't block).
-	TsnetErrorCh = make(chan error, 1)
-	// TsnetReadyCh gets closed when tsnet is ready.
-	TsnetReadyCh = make(chan struct{})
-	// TsnetSlowCh gets closed when connection is taking too long.
-	TsnetSlowCh = make(chan struct{})
-	// TsnetAuthURLCh receives auth URL when login is needed (buffered so send doesn't block).
-	TsnetAuthURLCh = make(chan string, 1)
-)
-
 //go:embed ui/templates/*.html ui/templates/partials/*.html ui/static/*
 var uiFS embed.FS
 
