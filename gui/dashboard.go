@@ -27,6 +27,9 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	case ts.StateNeedsLogin:
 		showLoginPage(w, state.AuthURL)
 		return
+	case ts.StateNeedsMachineAuth:
+		showMachineAuthPage(w)
+		return
 	case ts.StateConnectingSlow:
 		showSlowConnectionPage(w, baseDomain)
 		return
@@ -203,6 +206,14 @@ func showLoginPage(w http.ResponseWriter, authURL string) {
 
 	if err := renderTemplate(w, "login.html", data); err != nil {
 		log.Printf("dashboard: failed to render login template: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func showMachineAuthPage(w http.ResponseWriter) {
+	if err := renderTemplate(w, "machine_auth.html", nil); err != nil {
+		log.Printf("dashboard: failed to render machine auth template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

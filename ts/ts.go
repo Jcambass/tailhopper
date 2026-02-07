@@ -118,6 +118,7 @@ func (s *Server) startIPNWatcher() {
 			n, err := watcher.Next()
 			if err != nil {
 				log.Printf("IPN watcher error: %v", err)
+				s.state.SetError(err)
 				return
 			}
 			if n.State != nil {
@@ -128,7 +129,6 @@ func (s *Server) startIPNWatcher() {
 					log.Printf("tsnet fully connected")
 					s.updateBaseDomain()
 					s.state.SetRunning()
-					return
 				case ipn.NeedsLogin:
 					log.Printf("tsnet needs login")
 					s.clearCachedDomain()
@@ -137,6 +137,15 @@ func (s *Server) startIPNWatcher() {
 						log.Printf("Auth URL: %s", status.AuthURL)
 						s.state.SetNeedsLogin(status.AuthURL)
 					}
+				case ipn.NeedsMachineAuth:
+					log.Printf("tsnet needs machine auth (admin approval)")
+					s.state.SetNeedsMachineAuth()
+				case ipn.Stopped:
+					log.Printf("tsnet stopped/disconnected")
+					s.state.SetConnecting()
+				case ipn.Starting:
+					log.Printf("tsnet starting")
+					s.state.SetConnecting()
 				}
 			}
 			// Also check for auth URL in BrowseToURL notifications

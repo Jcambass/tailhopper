@@ -608,6 +608,41 @@ h1 { color: #333; }
   user-select: all;
 }
 
+/* Machine Auth Page */
+.machine-auth-page {
+  max-width: 600px;
+  margin: 0 auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 70vh;
+}
+
+.machine-auth-instructions {
+  margin: 20px 0;
+  padding: 20px;
+  background: #fff3e0;
+  border-radius: 8px;
+  max-width: 400px;
+}
+
+.machine-auth-instructions p {
+  margin: 10px 0;
+  color: #555;
+  font-size: 0.95em;
+}
+
+.machine-auth-instructions a {
+  color: #e65100;
+  text-decoration: underline;
+}
+
+.machine-auth-instructions a:hover {
+  color: #bf360c;
+}
+
 /* Empty State */
 .empty-state {
   background: #f9f9f9;

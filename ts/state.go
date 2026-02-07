@@ -14,6 +14,8 @@ const (
 	StateConnectingSlow
 	// StateNeedsLogin indicates authentication is required.
 	StateNeedsLogin
+	// StateNeedsMachineAuth indicates the device needs admin approval.
+	StateNeedsMachineAuth
 	// StateRunning indicates tsnet is fully connected and operational.
 	StateRunning
 	// StateError indicates a fatal error occurred.
@@ -28,6 +30,8 @@ func (s State) String() string {
 		return "ConnectingSlow"
 	case StateNeedsLogin:
 		return "NeedsLogin"
+	case StateNeedsMachineAuth:
+		return "NeedsMachineAuth"
 	case StateRunning:
 		return "Running"
 	case StateError:
@@ -119,6 +123,11 @@ func (sm *StateMachine) SetConnectingSlow() {
 // SetNeedsLogin transitions to the NeedsLogin state with an auth URL.
 func (sm *StateMachine) SetNeedsLogin(authURL string) {
 	sm.transition(StateData{State: StateNeedsLogin, AuthURL: authURL})
+}
+
+// SetNeedsMachineAuth transitions to the NeedsMachineAuth state.
+func (sm *StateMachine) SetNeedsMachineAuth() {
+	sm.transition(StateData{State: StateNeedsMachineAuth})
 }
 
 // SetRunning transitions to the Running state.
