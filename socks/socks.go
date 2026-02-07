@@ -31,8 +31,8 @@ type liveConnection struct {
 	Host      string
 	Port      string
 	StartTime time.Time
-	bytesSent atomic.Int64
-	bytesRecv atomic.Int64
+	BytesSent atomic.Int64
+	BytesRecv atomic.Int64
 }
 
 // ConnectionLog tracks proxy connections.
@@ -52,7 +52,6 @@ func NewConnectionLog(maxEntries int) *ConnectionLog {
 	}
 }
 
-// startConnection records a new connection attempt.
 func (cl *ConnectionLog) startConnection(host, port string) *liveConnection {
 	lc := &liveConnection{
 		Host:      host,
@@ -65,7 +64,6 @@ func (cl *ConnectionLog) startConnection(host, port string) *liveConnection {
 	return lc
 }
 
-// endConnection marks a connection as complete.
 func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
@@ -80,8 +78,8 @@ func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 		Port:      lc.Port,
 		StartTime: lc.StartTime,
 		EndTime:   time.Now(),
-		BytesSent: lc.bytesSent.Load(),
-		BytesRecv: lc.bytesRecv.Load(),
+		BytesSent: lc.BytesSent.Load(),
+		BytesRecv: lc.BytesRecv.Load(),
 	}
 	if err != nil {
 		connEntry.Error = err.Error()
@@ -93,6 +91,7 @@ func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	}
 }
 
+// GetRecent returns recent connections (newest first) and live connections.
 // GetRecent returns recent connections (newest first) and live connections.
 func (cl *ConnectionLog) GetRecent(n int) ([]ConnectionEntry, []ConnectionEntry) {
 	cl.mu.RLock()
@@ -115,8 +114,8 @@ func (cl *ConnectionLog) GetRecent(n int) ([]ConnectionEntry, []ConnectionEntry)
 			Host:      lc.Host,
 			Port:      lc.Port,
 			StartTime: lc.StartTime,
-			BytesSent: lc.bytesSent.Load(),
-			BytesRecv: lc.bytesRecv.Load(),
+			BytesSent: lc.BytesSent.Load(),
+			BytesRecv: lc.BytesRecv.Load(),
 		})
 	}
 
@@ -134,7 +133,7 @@ type trackedConn struct {
 func (tc *trackedConn) Read(b []byte) (int, error) {
 	n, err := tc.Conn.Read(b)
 	if n > 0 {
-		tc.lc.bytesRecv.Add(int64(n))
+		tc.lc.BytesRecv.Add(int64(n))
 	}
 	return n, err
 }
@@ -142,7 +141,7 @@ func (tc *trackedConn) Read(b []byte) (int, error) {
 func (tc *trackedConn) Write(b []byte) (int, error) {
 	n, err := tc.Conn.Write(b)
 	if n > 0 {
-		tc.lc.bytesSent.Add(int64(n))
+		tc.lc.BytesSent.Add(int64(n))
 	}
 	return n, err
 }
