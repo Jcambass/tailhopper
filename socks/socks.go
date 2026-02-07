@@ -15,18 +15,6 @@ import (
 // Dialer is a function that dials a network connection.
 type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
-// LiveConnection tracks an active connection's byte counts.
-type LiveConnection struct {
-	BytesSent atomic.Int64
-	BytesRecv atomic.Int64
-}
-
-// ConnectionTracker tracks active and completed connections.
-type ConnectionTracker interface {
-	StartConnection(host, port string, lc *LiveConnection)
-	EndConnection(lc *LiveConnection, err error)
-}
-
 // ConnectionEntry represents a completed or failed connection.
 type ConnectionEntry struct {
 	Host      string
@@ -38,20 +26,20 @@ type ConnectionEntry struct {
 	Error     string
 }
 
-// liveConnectionEntry tracks an active connection with its LiveConnection.
-type liveConnectionEntry struct {
+// liveConnection tracks an active connection with its byte counts.
+type liveConnection struct {
 	Host      string
 	Port      string
 	StartTime time.Time
-	lc        *LiveConnection
+	bytesSent atomic.Int64
+	bytesRecv atomic.Int64
 }
 
 // ConnectionLog tracks proxy connections.
-// It implements ConnectionTracker.
 type ConnectionLog struct {
 	mu          sync.RWMutex
 	connections []ConnectionEntry
-	live        map[*LiveConnection]*liveConnectionEntry
+	live        map[*liveConnection]struct{}
 	maxEntries  int
 }
 
@@ -59,44 +47,41 @@ type ConnectionLog struct {
 func NewConnectionLog(maxEntries int) *ConnectionLog {
 	return &ConnectionLog{
 		connections: make([]ConnectionEntry, 0, maxEntries),
-		live:        make(map[*LiveConnection]*liveConnectionEntry),
+		live:        make(map[*liveConnection]struct{}),
 		maxEntries:  maxEntries,
 	}
 }
 
-// StartConnection records a new connection attempt.
-// Implements ConnectionTracker.
-func (cl *ConnectionLog) StartConnection(host, port string, lc *LiveConnection) {
-	entry := &liveConnectionEntry{
+// startConnection records a new connection attempt.
+func (cl *ConnectionLog) startConnection(host, port string) *liveConnection {
+	lc := &liveConnection{
 		Host:      host,
 		Port:      port,
 		StartTime: time.Now(),
-		lc:        lc,
 	}
 	cl.mu.Lock()
-	cl.live[lc] = entry
+	cl.live[lc] = struct{}{}
 	cl.mu.Unlock()
+	return lc
 }
 
-// EndConnection marks a connection as complete.
-// Implements ConnectionTracker.
-func (cl *ConnectionLog) EndConnection(lc *LiveConnection, err error) {
+// endConnection marks a connection as complete.
+func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 
-	entry, ok := cl.live[lc]
-	if !ok {
+	if _, ok := cl.live[lc]; !ok {
 		return
 	}
 	delete(cl.live, lc)
 
 	connEntry := ConnectionEntry{
-		Host:      entry.Host,
-		Port:      entry.Port,
-		StartTime: entry.StartTime,
+		Host:      lc.Host,
+		Port:      lc.Port,
+		StartTime: lc.StartTime,
 		EndTime:   time.Now(),
-		BytesSent: lc.BytesSent.Load(),
-		BytesRecv: lc.BytesRecv.Load(),
+		BytesSent: lc.bytesSent.Load(),
+		BytesRecv: lc.bytesRecv.Load(),
 	}
 	if err != nil {
 		connEntry.Error = err.Error()
@@ -125,70 +110,66 @@ func (cl *ConnectionLog) GetRecent(n int) ([]ConnectionEntry, []ConnectionEntry)
 
 	// Get live connections
 	live := make([]ConnectionEntry, 0, len(cl.live))
-	for lc, entry := range cl.live {
+	for lc := range cl.live {
 		live = append(live, ConnectionEntry{
-			Host:      entry.Host,
-			Port:      entry.Port,
-			StartTime: entry.StartTime,
-			BytesSent: lc.BytesSent.Load(),
-			BytesRecv: lc.BytesRecv.Load(),
+			Host:      lc.Host,
+			Port:      lc.Port,
+			StartTime: lc.StartTime,
+			BytesSent: lc.bytesSent.Load(),
+			BytesRecv: lc.bytesRecv.Load(),
 		})
 	}
 
 	return recent, live
 }
 
-// TrackedConn wraps a net.Conn to track bytes transferred.
-type TrackedConn struct {
+// trackedConn wraps a net.Conn to track bytes transferred.
+type trackedConn struct {
 	net.Conn
-	lc *LiveConnection
-}
-
-func (tc *TrackedConn) Read(b []byte) (int, error) {
-	n, err := tc.Conn.Read(b)
-	if n > 0 {
-		tc.lc.BytesRecv.Add(int64(n))
-	}
-	return n, err
-}
-
-func (tc *TrackedConn) Write(b []byte) (int, error) {
-	n, err := tc.Conn.Write(b)
-	if n > 0 {
-		tc.lc.BytesSent.Add(int64(n))
-	}
-	return n, err
-}
-
-type trackedConnWithClose struct {
-	TrackedConn
-	tracker ConnectionTracker
+	lc      *liveConnection
+	connLog *ConnectionLog
 	closed  atomic.Bool
 }
 
-func (tc *trackedConnWithClose) Close() error {
+func (tc *trackedConn) Read(b []byte) (int, error) {
+	n, err := tc.Conn.Read(b)
+	if n > 0 {
+		tc.lc.bytesRecv.Add(int64(n))
+	}
+	return n, err
+}
+
+func (tc *trackedConn) Write(b []byte) (int, error) {
+	n, err := tc.Conn.Write(b)
+	if n > 0 {
+		tc.lc.bytesSent.Add(int64(n))
+	}
+	return n, err
+}
+
+func (tc *trackedConn) Close() error {
 	if tc.closed.CompareAndSwap(false, true) {
-		tc.tracker.EndConnection(tc.lc, nil)
+		tc.connLog.endConnection(tc.lc, nil)
 	}
 	return tc.Conn.Close()
 }
 
 // wrapDialer wraps a dialer function to track connections.
-func wrapDialer(dial Dialer, tracker ConnectionTracker) Dialer {
+func wrapDialer(dial Dialer, connLog *ConnectionLog) Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, _ := net.SplitHostPort(addr)
-		lc := &LiveConnection{}
-		tracker.StartConnection(host, port, lc)
+		lc := connLog.startConnection(host, port)
 
 		conn, err := dial(ctx, network, addr)
 		if err != nil {
-			tracker.EndConnection(lc, err)
+			connLog.endConnection(lc, err)
 			return nil, err
 		}
 
-		return &trackedConnWithClose{
-			TrackedConn: TrackedConn{Conn: conn, lc: lc},
-			tracker:     tracker,
+		return &trackedConn{
+			Conn:    conn,
+			lc:      lc,
+			connLog: connLog,
 		}, nil
 	}
 }
