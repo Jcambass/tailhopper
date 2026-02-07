@@ -366,6 +366,25 @@ h1 { color: #333; }
   color: #555;
 }
 
+.labeled-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.labeled-code strong {
+  min-width: 38px;
+  font-size: 0.85em;
+  color: #444;
+}
+
+.labeled-code .code-block {
+  flex: 1;
+  margin: 0;
+  padding: 6px 10px;
+}
+
 .code-block {
   display: flex;
   align-items: center;
@@ -385,7 +404,7 @@ h1 { color: #333; }
 }
 
 .copy-btn {
-  padding: 6px;
+  padding: 5px;
   background: #0066cc;
   color: white;
   border: none;
@@ -397,8 +416,8 @@ h1 { color: #333; }
 }
 
 .copy-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .copy-btn .icon-check { display: none; }
