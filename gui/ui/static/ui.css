@@ -11,9 +11,24 @@
   flex-shrink: 0;
 }
 
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
 .dashboard-header h1 {
   margin: 0;
+}
+
+.machine-identity {
+  margin: 0;
+  font-size: 0.85em;
+  color: #666;
+}
+
+.machine-identity strong {
+  color: #2e5d2f;
 }
 
 .machines-title {

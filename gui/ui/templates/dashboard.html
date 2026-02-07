@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tailhopper Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/ui.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/ui.js" defer></script>
@@ -67,7 +68,10 @@
         </g>
       </g>
     </svg>
-    <h1>Tailhopper Dashboard</h1>
+    <div class="header-text">
+      <h1>Tailhopper Dashboard</h1>
+      <p class="machine-identity">Connected to <strong>{{.BaseDomain}}</strong> as <strong>{{.Hostname}}</strong></p>
+    </div>
   </div>
 
   <!-- SOCKS5 Proxy Setup Section -->
