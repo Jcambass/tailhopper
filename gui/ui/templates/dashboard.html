@@ -118,17 +118,6 @@
     </div>
   </div>
 
-  <!-- Recent Connections Section -->
-  <div class="connections-section">
-    <h2>📡 Recent Connections</h2>
-    <div id="connections-list" class="connections-list"
-         hx-get="/partials/connections"
-         hx-trigger="every 5s"
-         hx-swap="innerHTML">
-      {{template "connection_groups" .ConnectionGroups}}
-    </div>
-  </div>
-
   <h2 class="machines-title">Available Machines <span class="tailnet-tag">{{.BaseDomain}}</span></h2>
 
   <div id="machines-list"
@@ -136,6 +125,14 @@
        hx-trigger="every 10s"
        hx-swap="innerHTML">
   {{template "machines" .}}
+  </div>
+
+  <!-- Unknown Connections Section -->
+  <div id="unknown-connections-section"
+       hx-get="/partials/connections"
+       hx-trigger="every 5s"
+       hx-swap="innerHTML">
+    {{template "unknown_connections" .UnknownConnections}}
   </div>
 </body>
 </html>

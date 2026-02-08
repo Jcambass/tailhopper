@@ -24,6 +24,7 @@ type ConnectionEntry struct {
 	BytesSent int64
 	BytesRecv int64
 	Error     string
+	Connected bool // true if dial succeeded (for live connections)
 }
 
 // liveConnection tracks an active connection with its byte counts.
@@ -33,6 +34,7 @@ type liveConnection struct {
 	StartTime time.Time
 	BytesSent atomic.Int64
 	BytesRecv atomic.Int64
+	Connected atomic.Bool // true once dial succeeds
 }
 
 // ConnectionStats contains aggregate connection statistics.
@@ -143,6 +145,7 @@ func (cl *ConnectionLog) GetRecent(n int) ([]ConnectionEntry, []ConnectionEntry)
 			StartTime: lc.StartTime,
 			BytesSent: lc.BytesSent.Load(),
 			BytesRecv: lc.BytesRecv.Load(),
+			Connected: lc.Connected.Load(),
 		})
 	}
 
@@ -191,6 +194,8 @@ func wrapDialer(dial Dialer, connLog *ConnectionLog) Dialer {
 			connLog.endConnection(lc, err)
 			return nil, err
 		}
+
+		lc.Connected.Store(true)
 
 		return &trackedConn{
 			Conn:    conn,

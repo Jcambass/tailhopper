@@ -1,0 +1,10 @@
+{{define "unknown_connections"}}
+{{if .}}
+<div class="connections-section">
+  <h2>🔗 Other Connections</h2>
+  <div class="connections-list">
+    {{template "connection_groups" .}}
+  </div>
+</div>
+{{end}}
+{{end}}

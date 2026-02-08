@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/portscan"
+	"github.com/jcambass/tailhopper/socks"
 	"github.com/jcambass/tailhopper/ts"
 )
 
 // HandleMachinesPartial returns a handler for the machines partial.
-func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner) http.HandlerFunc {
+func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner, connLog *socks.ConnectionLog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		baseDomain := tsServer.BaseDomain()
 
@@ -26,6 +27,21 @@ func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner) http.
 			http.Error(w, "failed to get status", http.StatusInternalServerError)
 			return
 		}
+
+		// Build set of known machine names from peers
+		knownMachines := make(map[string]bool)
+		for _, peer := range status.Peer {
+			if len(peer.TailscaleIPs) == 0 {
+				continue
+			}
+			machineName := deriveMachineName(peer.DNSName, peer.HostName, baseDomain)
+			knownMachines[machineName] = true
+		}
+
+		// Get connection stats by machine
+		recent, live := connLog.GetRecent(50)
+		allGroups := groupAllConnections(recent, live)
+		knownConnections, _ := classifyConnectionGroups(allGroups, baseDomain, knownMachines)
 
 		hostname := ""
 		if status.Self != nil {
@@ -63,7 +79,7 @@ func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner) http.
 				defaultHTTPS = true
 			}
 
-			data.Machines = append(data.Machines, machineView{
+			mv := machineView{
 				Name:         machineName,
 				DNSName:      peer.DNSName,
 				StatusClass:  statusClass,
@@ -74,7 +90,20 @@ func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner) http.
 				DefaultHTTPS: defaultHTTPS,
 				HasPorts:     hasPorts,
 				Scanning:     scanning,
-			})
+			}
+
+			// Merge connection stats if available
+			if stats, ok := knownConnections[machineName]; ok {
+				mv.TotalCount = stats.TotalCount
+				mv.ActiveCount = stats.ActiveCount
+				mv.ConnectingCount = stats.ConnectingCount
+				mv.SuccessCount = stats.SuccessCount
+				mv.ErrorCount = stats.ErrorCount
+				mv.BytesSent = stats.BytesSent
+				mv.BytesRecv = stats.BytesRecv
+			}
+
+			data.Machines = append(data.Machines, mv)
 		}
 
 		sort.Slice(data.Machines, func(i, j int) bool {

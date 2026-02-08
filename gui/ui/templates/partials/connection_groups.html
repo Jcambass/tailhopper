@@ -2,14 +2,14 @@
 {{if .}}
 <div class="connection-groups">
   {{range .}}
-  <div class="connection-group {{if gt .ActiveCount 0}}has-active{{end}}{{if gt .ErrorCount 0}} has-errors{{end}}">
+  <div class="connection-group {{if gt .ActiveCount 0}}has-active{{else if gt .ConnectingCount 0}}has-connecting{{end}}{{if gt .ErrorCount 0}} has-errors{{end}}">
     <div class="group-header">
       <span class="group-status">
-        {{if gt .ActiveCount 0}}<span class="status-dot active"></span>{{else if gt .ErrorCount 0}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}
+        {{if gt .ActiveCount 0}}<span class="status-dot active"></span>{{else if gt .ConnectingCount 0}}<span class="status-dot connecting"></span>{{else if gt .ErrorCount 0}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}
       </span>
       <span class="group-target">{{.Host}}:{{.Port}}</span>
       <span class="group-meta">
-        {{if gt .ActiveCount 0}}<span class="badge active">active</span>{{end}}
+        {{if gt .ActiveCount 0}}<span class="badge active">active</span>{{else if gt .ConnectingCount 0}}<span class="badge connecting">connecting</span>{{end}}
         <span class="group-count">{{.TotalCount}}x ({{.SuccessCount}} ok, {{.ErrorCount}} err)</span>
         <span class="group-data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</span>
         <span class="group-time">{{formatTime .LastTime}}</span>

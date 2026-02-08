@@ -102,27 +102,28 @@ func deriveMachineName(dnsName, hostName, baseDomain string) string {
 
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
-	BaseDomain       string
-	Hostname         string
-	SocksAddr        string
-	SocksHost        string
-	SocksPort        string
-	PACFileURL       string
-	Machines         []machineView
-	ConnectionGroups []connectionGroupView
+	BaseDomain         string
+	Hostname           string
+	SocksAddr          string
+	SocksHost          string
+	SocksPort          string
+	PACFileURL         string
+	Machines           []machineView
+	UnknownConnections []connectionGroupView
 }
 
 // connectionGroupView represents a group of connections to the same host:port.
 type connectionGroupView struct {
-	Host         string
-	Port         string
-	TotalCount   int
-	ActiveCount  int
-	SuccessCount int
-	ErrorCount   int
-	BytesSent    int64
-	BytesRecv    int64
-	LastTime     time.Time
+	Host            string
+	Port            string
+	TotalCount      int
+	ActiveCount     int // established and transferring data
+	ConnectingCount int // dialing, not yet connected
+	SuccessCount    int
+	ErrorCount      int
+	BytesSent       int64
+	BytesRecv       int64
+	LastTime        time.Time
 }
 
 // machineView represents a machine for display.
@@ -137,4 +138,12 @@ type machineView struct {
 	DefaultHTTPS bool
 	HasPorts     bool
 	Scanning     bool
+	// Connection stats for this machine
+	TotalCount      int
+	ActiveCount     int
+	ConnectingCount int
+	SuccessCount    int
+	ErrorCount      int
+	BytesSent       int64
+	BytesRecv       int64
 }
