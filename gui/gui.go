@@ -26,6 +26,8 @@ func init() {
 	funcMap := template.FuncMap{
 		"formatDuration": formatDuration,
 		"formatBytes":    formatBytes,
+		"formatTime":     formatTime,
+		"sub":            func(a, b int) int { return a - b },
 	}
 	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "ui/templates/*.html", "ui/templates/partials/*.html")
 	if err != nil {
@@ -58,6 +60,13 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("15:04:05")
 }
 
 func formatIPs(ips []netip.Addr) []string {
@@ -93,26 +102,27 @@ func deriveMachineName(dnsName, hostName, baseDomain string) string {
 
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
-	BaseDomain  string
-	Hostname    string
-	SocksAddr   string
-	SocksHost   string
-	SocksPort   string
-	PACFileURL  string
-	Machines    []machineView
-	Connections []connectionView
+	BaseDomain       string
+	Hostname         string
+	SocksAddr        string
+	SocksHost        string
+	SocksPort        string
+	PACFileURL       string
+	Machines         []machineView
+	ConnectionGroups []connectionGroupView
 }
 
-// connectionView represents a connection for display.
-type connectionView struct {
-	Host      string
-	Port      string
-	StartTime time.Time
-	EndTime   time.Time
-	BytesSent int64
-	BytesRecv int64
-	Active    bool
-	Error     string
+// connectionGroupView represents a group of connections to the same host:port.
+type connectionGroupView struct {
+	Host         string
+	Port         string
+	TotalCount   int
+	ActiveCount  int
+	SuccessCount int
+	ErrorCount   int
+	BytesSent    int64
+	BytesRecv    int64
+	LastTime     time.Time
 }
 
 // machineView represents a machine for display.

@@ -449,12 +449,53 @@ h1 { color: #333; }
   margin-bottom: 24px;
 }
 
+.connections-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.connections-header h2 {
+  margin: 0;
+  font-size: 1.1em;
+}
+
 .connections-section h2 {
   margin: 0 0 16px 0;
   font-size: 1.1em;
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.connection-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.85em;
+  color: #666;
+}
+
+.connection-stats .stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.connection-stats .stat.success {
+  color: #4caf50;
+}
+
+.connection-stats .stat.error {
+  color: #f44336;
+}
+
+.connection-stats .stat.active {
+  color: #2196f3;
+}
+
+.connection-stats .stat.rate {
+  color: #888;
 }
 
 .refresh-btn {
@@ -534,9 +575,94 @@ h1 { color: #333; }
   font-size: 0.9em;
 }
 
+.time {
+  color: #888;
+  font-size: 0.85em;
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+.error-indicator {
+  margin-left: 6px;
+  color: #f44336;
+  cursor: help;
+}
+
 .duration, .data {
   color: #666;
   font-size: 0.85em;
+}
+
+/* Connection Groups */
+.connection-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-group {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.connection-group.has-active {
+  border-color: #4caf50;
+}
+
+.connection-group.has-errors:not(.has-active) {
+  border-color: #ffcdd2;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.group-status {
+  display: flex;
+  align-items: center;
+}
+
+.group-target {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.95em;
+  font-weight: 500;
+  flex: 1;
+}
+
+.group-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8em;
+  color: #888;
+}
+
+.group-count {
+  color: #666;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge.active {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.group-data {
+  color: #888;
+}
+
+.group-time {
+  color: #aaa;
+  font-family: 'SF Mono', Monaco, monospace;
 }
 
 /* Login Page */

@@ -58,29 +58,8 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 
 	// Get connections
-	recent, live := connLog.GetRecent(20)
-	connections := make([]connectionView, 0, len(live)+len(recent))
-	for _, c := range live {
-		connections = append(connections, connectionView{
-			Host:      c.Host,
-			Port:      c.Port,
-			StartTime: c.StartTime,
-			BytesSent: c.BytesSent,
-			BytesRecv: c.BytesRecv,
-			Active:    true,
-		})
-	}
-	for _, c := range recent {
-		connections = append(connections, connectionView{
-			Host:      c.Host,
-			Port:      c.Port,
-			StartTime: c.StartTime,
-			EndTime:   c.EndTime,
-			BytesSent: c.BytesSent,
-			BytesRecv: c.BytesRecv,
-			Error:     c.Error,
-		})
-	}
+	recent, live := connLog.GetRecent(50)
+	connectionGroups := groupConnections(recent, live)
 
 	// Get our hostname from status
 	hostname := ""
@@ -89,14 +68,14 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	}
 
 	data := dashboardData{
-		BaseDomain:  baseDomain,
-		Hostname:    hostname,
-		SocksAddr:   socksAddr,
-		SocksHost:   socksHost,
-		SocksPort:   socksPort,
-		PACFileURL:  pac.URLPath,
-		Machines:    []machineView{},
-		Connections: connections,
+		BaseDomain:       baseDomain,
+		Hostname:         hostname,
+		SocksAddr:        socksAddr,
+		SocksHost:        socksHost,
+		SocksPort:        socksPort,
+		PACFileURL:       pac.URLPath,
+		Machines:         []machineView{},
+		ConnectionGroups: connectionGroups,
 	}
 
 	for _, peer := range status.Peer {

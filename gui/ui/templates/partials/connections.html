@@ -4,6 +4,7 @@
   <thead>
     <tr>
       <th>Status</th>
+      <th>Time</th>
       <th>Target</th>
       <th>Duration</th>
       <th>Data</th>
@@ -12,8 +13,9 @@
   <tbody>
     {{range .}}
     <tr class="{{if .Active}}active{{else if .Error}}error{{end}}">
-      <td>{{if .Active}}<span class="status-dot active"></span>{{else if .Error}}<span class="status-dot error"></span>{{else}}<span class="status-dot done"></span>{{end}}</td>
-      <td class="target">{{.Host}}:{{.Port}}</td>
+      <td>{{if .Active}}<span class="status-dot active"></span>{{else if .Error}}<span class="status-dot error" title="{{.Error}}"></span>{{else}}<span class="status-dot done"></span>{{end}}</td>
+      <td class="time">{{formatTime .StartTime}}</td>
+      <td class="target">{{.Host}}:{{.Port}}{{if .Error}}<span class="error-indicator" title="{{.Error}}">⚠</span>{{end}}</td>
       <td class="duration">{{if .Active}}ongoing{{else}}{{formatDuration .StartTime .EndTime}}{{end}}</td>
       <td class="data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</td>
     </tr>
