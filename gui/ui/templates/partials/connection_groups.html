@@ -1,23 +1,21 @@
 {{define "connection_groups"}}
 {{if .}}
-<div class="connection-groups">
-  {{range .}}
-  <div class="connection-group {{if gt .ActiveCount 0}}has-active{{else if gt .ConnectingCount 0}}has-connecting{{else if .HasFailed}}has-failed{{end}}">
-    <div class="group-header">
-      <span class="group-status">
-        {{if gt .ActiveCount 0}}<span class="status-dot active"></span>{{else if gt .ConnectingCount 0}}<span class="status-dot connecting"></span>{{else if .HasFailed}}<span class="status-dot failed"></span>{{else}}<span class="status-dot done"></span>{{end}}
-      </span>
-      <span class="group-target">{{.Host}}:{{.Port}}</span>
-      <span class="group-meta">
-        {{if gt .ActiveCount 0}}<span class="badge active">active</span>{{else if gt .ConnectingCount 0}}<span class="badge connecting">connecting</span>{{else if .HasFailed}}<span class="badge failed">failed</span>{{end}}
-        <span class="group-data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</span>
-        <span class="group-time">{{formatTime .LastTime}}</span>
-      </span>
+{{range .}}
+<div class="machine {{if gt .ActiveCount 0}}has-active{{else if gt .ConnectingCount 0}}has-connecting{{else if .HasFailed}}has-failed{{end}}">
+  <div class="machine-header">
+    <div class="machine-info">
+      <div class="machine-name">
+        <span class="machine-status-dot {{if gt .ActiveCount 0}}active{{else if gt .ConnectingCount 0}}connecting{{else if .HasFailed}}failed{{else}}done{{end}}"></span>
+        {{.Host}}:{{.Port}}
+      </div>
+    </div>
+    <div class="machine-stats-corner">
+      {{if gt .ActiveCount 0}}<span class="badge active">active</span>{{else if gt .ConnectingCount 0}}<span class="badge connecting">connecting</span>{{else if .HasFailed}}<span class="badge failed">failed</span>{{end}}
+      <span class="conn-data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</span>
+      <span class="group-time">{{formatTime .LastTime}}</span>
     </div>
   </div>
-  {{end}}
 </div>
-{{else}}
-<p class="no-connections">No connections yet. Configure your browser with the PAC file above to get started.</p>
+{{end}}
 {{end}}
 {{end}}

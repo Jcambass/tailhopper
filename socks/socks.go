@@ -93,14 +93,6 @@ func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	}
 }
 
-// ActiveCount returns the number of currently live connections.
-func (cl *ConnectionLog) ActiveCount() int {
-	cl.mu.RLock()
-	defer cl.mu.RUnlock()
-	return len(cl.live)
-}
-
-// GetRecent returns recent connections (newest first) and live connections.
 // GetRecent returns recent connections (newest first) and live connections.
 func (cl *ConnectionLog) GetRecent(n int) ([]ConnectionEntry, []ConnectionEntry) {
 	cl.mu.RLock()
