@@ -2,6 +2,7 @@ package ts
 
 import (
 	"sync"
+	"time"
 )
 
 // State represents the current tsnet connection state.
@@ -48,21 +49,22 @@ type StateData struct {
 	Error   error  // Set when State == StateError
 }
 
-// StateObserver is called whenever the state changes.
-type StateObserver func(StateData)
+var slowTimeout = 10 * time.Second
 
 // StateMachine manages tsnet connection state transitions.
 type StateMachine struct {
 	mu        sync.RWMutex
 	current   StateData
-	observers []StateObserver
+	slowTimer *time.Timer
 }
 
 // NewStateMachine creates a new state machine in the Connecting state.
 func NewStateMachine() *StateMachine {
-	return &StateMachine{
+	sm := &StateMachine{
 		current: StateData{State: StateConnecting},
 	}
+	sm.startSlowTimer()
+	return sm
 }
 
 // Current returns the current state data.
@@ -72,52 +74,49 @@ func (sm *StateMachine) Current() StateData {
 	return sm.current
 }
 
-// OnChange registers an observer to be called on state changes.
-// The observer is also called immediately with the current state.
-func (sm *StateMachine) OnChange(observer StateObserver) {
-	sm.mu.Lock()
-	sm.observers = append(sm.observers, observer)
-	current := sm.current
-	sm.mu.Unlock()
-
-	// Call immediately with current state
-	observer(current)
-}
-
-// transition changes the state and notifies observers.
+// transition changes the state.
 func (sm *StateMachine) transition(newState StateData) {
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	if sm.current.State == newState.State &&
 		sm.current.AuthURL == newState.AuthURL &&
 		sm.current.Error == newState.Error {
-		sm.mu.Unlock()
 		return // No change
 	}
 	sm.current = newState
-	observers := make([]StateObserver, len(sm.observers))
-	copy(observers, sm.observers)
-	sm.mu.Unlock()
-
-	for _, obs := range observers {
-		obs(newState)
-	}
 }
 
-// SetConnecting transitions to the Connecting state.
+// startSlowTimer starts the timer that triggers ConnectingSlow state.
+func (sm *StateMachine) startSlowTimer() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Cancel existing timer if any
+	if sm.slowTimer != nil {
+		sm.slowTimer.Stop()
+	}
+
+	sm.slowTimer = time.AfterFunc(slowTimeout, func() {
+		if sm.Current().State == StateConnecting {
+			sm.SetConnectingSlow()
+		}
+	})
+}
+
+// SetConnecting transitions to the Connecting state and starts the slow timer.
 func (sm *StateMachine) SetConnecting() {
+	// Do not regress to connecting if already in slow connecting state
+	if sm.Current().State == StateConnectingSlow {
+		return
+	}
+
 	sm.transition(StateData{State: StateConnecting})
+	sm.startSlowTimer()
 }
 
 // SetConnectingSlow transitions to the ConnectingSlow state.
 func (sm *StateMachine) SetConnectingSlow() {
-	sm.mu.RLock()
-	current := sm.current.State
-	sm.mu.RUnlock()
-
-	// Only transition to slow if still in connecting state
-	if current == StateConnecting {
-		sm.transition(StateData{State: StateConnectingSlow})
-	}
+	sm.transition(StateData{State: StateConnectingSlow})
 }
 
 // SetNeedsLogin transitions to the NeedsLogin state with an auth URL.
@@ -138,11 +137,4 @@ func (sm *StateMachine) SetRunning() {
 // SetError transitions to the Error state.
 func (sm *StateMachine) SetError(err error) {
 	sm.transition(StateData{State: StateError, Error: err})
-}
-
-// IsReady returns true if the state machine is in the Running state.
-func (sm *StateMachine) IsReady() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.current.State == StateRunning
 }

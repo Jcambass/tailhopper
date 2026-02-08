@@ -16,9 +16,6 @@ import (
 
 const baseDomainFile = "tailhopper-domain"
 
-// SlowTimeout is the duration after which the "still connecting" message is shown.
-const SlowTimeout = 10 * time.Second
-
 // Server wraps a tsnet.Server with state management.
 type Server struct {
 	*tsnet.Server
@@ -86,14 +83,6 @@ func (s *Server) clearCachedDomain() {
 	log.Printf("Cleared cached domain (re-authentication required)")
 }
 
-// startSlowTimeout triggers the ConnectingSlow state after timeout if not ready.
-func (s *Server) startSlowTimeout() {
-	go func() {
-		time.Sleep(SlowTimeout)
-		s.state.SetConnectingSlow()
-	}()
-}
-
 // startIPNWatcher watches for IPN state changes and updates the state machine.
 func (s *Server) startIPNWatcher() {
 	go func() {
@@ -159,7 +148,6 @@ func (s *Server) startIPNWatcher() {
 
 // Start begins the tsnet connection in the background.
 func (s *Server) Start() {
-	s.startSlowTimeout()
 	s.startIPNWatcher()
 
 	go func() {
