@@ -116,11 +116,9 @@ type dashboardData struct {
 type connectionGroupView struct {
 	Host            string
 	Port            string
-	TotalCount      int
-	ActiveCount     int // established and transferring data
-	ConnectingCount int // dialing, not yet connected
-	SuccessCount    int
-	ErrorCount      int
+	ActiveCount     int  // established and transferring data
+	ConnectingCount int  // dialing, not yet connected
+	HasFailed       bool // had a recent failure
 	BytesSent       int64
 	BytesRecv       int64
 	LastTime        time.Time
@@ -128,22 +126,15 @@ type connectionGroupView struct {
 
 // machineView represents a machine for display.
 type machineView struct {
-	Name         string
-	DNSName      string
-	StatusClass  string
-	StatusText   string
-	IPs          string
-	CachedPorts  []int
-	Scanned      bool
-	DefaultHTTPS bool
-	HasPorts     bool
-	Scanning     bool
+	Name        string
+	DNSName     string
+	StatusClass string
+	StatusText  string
+	IPs         string
 	// Connection stats for this machine
-	TotalCount      int
 	ActiveCount     int
 	ConnectingCount int
-	SuccessCount    int
-	ErrorCount      int
+	HasFailed       bool
 	BytesSent       int64
 	BytesRecv       int64
 }

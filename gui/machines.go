@@ -6,13 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jcambass/tailhopper/portscan"
 	"github.com/jcambass/tailhopper/socks"
 	"github.com/jcambass/tailhopper/ts"
 )
 
 // HandleMachinesPartial returns a handler for the machines partial.
-func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner, connLog *socks.ConnectionLog) http.HandlerFunc {
+func HandleMachinesPartial(tsServer *ts.Server, connLog *socks.ConnectionLog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		baseDomain := tsServer.BaseDomain()
 
@@ -70,35 +69,19 @@ func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner, connL
 				statusText = "online"
 			}
 
-			cachedPorts, scanned := scanner.GetCachedResults(peer.DNSName)
-			scanning := scanner.IsScanning(peer.DNSName)
-
-			hasPorts := len(cachedPorts) > 0
-			defaultHTTPS := false
-			if hasPorts && (cachedPorts[0] == 443 || cachedPorts[0] == 8448) {
-				defaultHTTPS = true
-			}
-
 			mv := machineView{
-				Name:         machineName,
-				DNSName:      peer.DNSName,
-				StatusClass:  statusClass,
-				StatusText:   statusText,
-				IPs:          strings.Join(formatIPs(peer.TailscaleIPs), ", "),
-				CachedPorts:  cachedPorts,
-				Scanned:      scanned,
-				DefaultHTTPS: defaultHTTPS,
-				HasPorts:     hasPorts,
-				Scanning:     scanning,
+				Name:        machineName,
+				DNSName:     peer.DNSName,
+				StatusClass: statusClass,
+				StatusText:  statusText,
+				IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
 			}
 
 			// Merge connection stats if available
 			if stats, ok := knownConnections[machineName]; ok {
-				mv.TotalCount = stats.TotalCount
 				mv.ActiveCount = stats.ActiveCount
 				mv.ConnectingCount = stats.ConnectingCount
-				mv.SuccessCount = stats.SuccessCount
-				mv.ErrorCount = stats.ErrorCount
+				mv.HasFailed = stats.HasFailed
 				mv.BytesSent = stats.BytesSent
 				mv.BytesRecv = stats.BytesRecv
 			}
@@ -107,6 +90,10 @@ func HandleMachinesPartial(tsServer *ts.Server, scanner *portscan.Scanner, connL
 		}
 
 		sort.Slice(data.Machines, func(i, j int) bool {
+			// Online machines first, then alphabetically by DNS name
+			if data.Machines[i].StatusClass != data.Machines[j].StatusClass {
+				return data.Machines[i].StatusClass == "online"
+			}
 			return strings.ToLower(data.Machines[i].DNSName) < strings.ToLower(data.Machines[j].DNSName)
 		})
 

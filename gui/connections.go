@@ -64,7 +64,6 @@ func groupAllConnections(recent []socks.ConnectionEntry, live []socks.Connection
 			groupMap[key] = group
 			groupOrder = append(groupOrder, key)
 		}
-		group.TotalCount++
 		if lc.Connected {
 			group.ActiveCount++
 		} else {
@@ -86,14 +85,11 @@ func groupAllConnections(recent []socks.ConnectionEntry, live []socks.Connection
 			groupMap[key] = group
 			groupOrder = append(groupOrder, key)
 		}
-		group.TotalCount++
+		if c.Error != "" {
+			group.HasFailed = true
+		}
 		group.BytesSent += c.BytesSent
 		group.BytesRecv += c.BytesRecv
-		if c.Error != "" {
-			group.ErrorCount++
-		} else {
-			group.SuccessCount++
-		}
 		if c.EndTime.After(group.LastTime) {
 			group.LastTime = c.EndTime
 		}
@@ -141,11 +137,9 @@ func classifyConnectionGroups(groups []connectionGroupView, baseDomain string, k
 				gCopy.Host = machineName // Use machine name as host for display
 				known[machineName] = &gCopy
 			} else {
-				existing.TotalCount += g.TotalCount
 				existing.ActiveCount += g.ActiveCount
 				existing.ConnectingCount += g.ConnectingCount
-				existing.SuccessCount += g.SuccessCount
-				existing.ErrorCount += g.ErrorCount
+				existing.HasFailed = existing.HasFailed || g.HasFailed
 				existing.BytesSent += g.BytesSent
 				existing.BytesRecv += g.BytesRecv
 				if g.LastTime.After(existing.LastTime) {

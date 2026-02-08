@@ -37,23 +37,12 @@ type liveConnection struct {
 	Connected atomic.Bool // true once dial succeeds
 }
 
-// ConnectionStats contains aggregate connection statistics.
-type ConnectionStats struct {
-	TotalConnections int
-	SuccessCount     int
-	ErrorCount       int
-	ActiveCount      int
-}
-
 // ConnectionLog tracks proxy connections.
 type ConnectionLog struct {
-	mu           sync.RWMutex
-	connections  []ConnectionEntry
-	live         map[*liveConnection]struct{}
-	maxEntries   int
-	totalCount   int
-	successCount int
-	errorCount   int
+	mu          sync.RWMutex
+	connections []ConnectionEntry
+	live        map[*liveConnection]struct{}
+	maxEntries  int
 }
 
 // NewConnectionLog creates a new connection log.
@@ -96,11 +85,7 @@ func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	}
 	if err != nil {
 		connEntry.Error = err.Error()
-		cl.errorCount++
-	} else {
-		cl.successCount++
 	}
-	cl.totalCount++
 
 	cl.connections = append(cl.connections, connEntry)
 	if len(cl.connections) > cl.maxEntries {
@@ -108,16 +93,11 @@ func (cl *ConnectionLog) endConnection(lc *liveConnection, err error) {
 	}
 }
 
-// Stats returns aggregate connection statistics.
-func (cl *ConnectionLog) Stats() ConnectionStats {
+// ActiveCount returns the number of currently live connections.
+func (cl *ConnectionLog) ActiveCount() int {
 	cl.mu.RLock()
 	defer cl.mu.RUnlock()
-	return ConnectionStats{
-		TotalConnections: cl.totalCount,
-		SuccessCount:     cl.successCount,
-		ErrorCount:       cl.errorCount,
-		ActiveCount:      len(cl.live),
-	}
+	return len(cl.live)
 }
 
 // GetRecent returns recent connections (newest first) and live connections.

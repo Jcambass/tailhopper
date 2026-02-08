@@ -122,7 +122,7 @@
 
   <div id="machines-list"
        hx-get="/partials/machines"
-       hx-trigger="every 10s"
+       hx-trigger="every 2s"
        hx-swap="innerHTML">
   {{template "machines" .}}
   </div>
@@ -130,7 +130,7 @@
   <!-- Unknown Connections Section -->
   <div id="unknown-connections-section"
        hx-get="/partials/connections"
-       hx-trigger="every 5s"
+       hx-trigger="every 2s"
        hx-swap="innerHTML">
     {{template "unknown_connections" .UnknownConnections}}
   </div>
