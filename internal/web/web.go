@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jcambass/tailhopper/internal/gui"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/ui"
 )
 
 // Server represents the HTTP server for Tailhopper.
@@ -24,13 +24,13 @@ func NewServer(addr string, tsServer *ts.Server, socksAddr string) *Server {
 	mux := http.NewServeMux()
 
 	// Static files
-	mux.Handle("/static/", gui.StaticHandler())
+	mux.Handle("/static/", ui.StaticHandler())
 
 	// Redirects
 	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
 
 	// Partial endpoints for htmx
-	mux.Handle("/partials/machines", gui.HandleMachinesPartial(tsServer))
+	mux.Handle("/partials/machines", ui.HandleMachinesPartial(tsServer))
 
 	// PAC file - uses BaseDomainGetter interface
 	mux.Handle(pac.URLPath, pac.Handler(tsServer, socksAddr))
@@ -38,7 +38,7 @@ func NewServer(addr string, tsServer *ts.Server, socksAddr string) *Server {
 	// Dashboard
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			gui.ServeDashboard(w, r, tsServer, socksAddr)
+			ui.ServeDashboard(w, r, tsServer, socksAddr)
 			return
 		}
 		http.Error(w, "not found", http.StatusNotFound)

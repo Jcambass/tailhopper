@@ -1,4 +1,4 @@
-package gui
+package ui
 
 import (
 	"io/fs"
@@ -8,7 +8,7 @@ import (
 // StaticHandler returns an http.Handler for serving static files.
 func StaticHandler() http.Handler {
 	staticOnce.Do(func() {
-		sub, err := fs.Sub(uiFS, "ui/static")
+		sub, err := fs.Sub(uiFS, "static")
 		if err != nil {
 			staticHandler = http.NotFoundHandler()
 			return

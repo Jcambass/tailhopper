@@ -1,5 +1,5 @@
-// Package gui provides HTTP handlers and templates for the Tailhopper dashboard.
-package gui
+// Package ui provides HTTP handlers and templates for the Tailhopper dashboard.
+package ui
 
 import (
 	"embed"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-//go:embed ui/templates/*.html ui/templates/partials/*.html ui/static/*
+//go:embed templates/*.html templates/partials/*.html static/*
 var uiFS embed.FS
 
 var (
@@ -29,7 +29,7 @@ func init() {
 		"formatTime":     formatTime,
 		"sub":            func(a, b int) int { return a - b },
 	}
-	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "ui/templates/*.html", "ui/templates/partials/*.html")
+	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "templates/*.html", "templates/partials/*.html")
 	if err != nil {
 		panic(err)
 	}
