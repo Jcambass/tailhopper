@@ -3,13 +3,11 @@ package ui
 
 import (
 	"embed"
-	"fmt"
 	"html/template"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
-	"time"
 )
 
 //go:embed templates/*.html templates/partials/*.html static/*
@@ -23,50 +21,11 @@ var (
 
 func init() {
 	var err error
-	funcMap := template.FuncMap{
-		"formatDuration": formatDuration,
-		"formatBytes":    formatBytes,
-		"formatTime":     formatTime,
-		"sub":            func(a, b int) int { return a - b },
-	}
+	funcMap := template.FuncMap{}
 	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "templates/*.html", "templates/partials/*.html")
 	if err != nil {
 		panic(err)
 	}
-}
-
-func formatDuration(start, end time.Time) string {
-	if end.IsZero() {
-		return "ongoing"
-	}
-	d := end.Sub(start)
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%.1fm", d.Minutes())
-}
-
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%dB", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("15:04:05")
 }
 
 func formatIPs(ips []netip.Addr) []string {

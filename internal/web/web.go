@@ -29,9 +29,6 @@ func NewServer(addr string, tsServer *ts.Server, socksAddr string) *Server {
 	// Redirects
 	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
 
-	// Partial endpoints for htmx
-	mux.Handle("/partials/machines", ui.HandleMachinesPartial(tsServer))
-
 	// PAC file - uses BaseDomainGetter interface
 	mux.Handle(pac.URLPath, pac.Handler(tsServer, socksAddr))
 
