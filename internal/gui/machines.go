@@ -6,12 +6,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jcambass/tailhopper/internal/socks"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // HandleMachinesPartial returns a handler for the machines partial.
-func HandleMachinesPartial(tsServer *ts.Server, connLog *socks.ConnectionLog) http.HandlerFunc {
+func HandleMachinesPartial(tsServer *ts.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		baseDomain := tsServer.BaseDomain()
 
@@ -26,21 +25,6 @@ func HandleMachinesPartial(tsServer *ts.Server, connLog *socks.ConnectionLog) ht
 			http.Error(w, "failed to get status", http.StatusInternalServerError)
 			return
 		}
-
-		// Build set of known machine names from peers
-		knownMachines := make(map[string]bool)
-		for _, peer := range status.Peer {
-			if len(peer.TailscaleIPs) == 0 {
-				continue
-			}
-			machineName := deriveMachineName(peer.DNSName, peer.HostName, baseDomain)
-			knownMachines[machineName] = true
-		}
-
-		// Get connection stats by machine
-		recent, live := connLog.GetRecent(50)
-		allGroups := groupAllConnections(recent, live)
-		knownConnections, _ := classifyConnectionGroups(allGroups, baseDomain, knownMachines)
 
 		hostname := ""
 		if status.Self != nil {
@@ -75,15 +59,6 @@ func HandleMachinesPartial(tsServer *ts.Server, connLog *socks.ConnectionLog) ht
 				StatusClass: statusClass,
 				StatusText:  statusText,
 				IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
-			}
-
-			// Merge connection stats if available
-			if stats, ok := knownConnections[machineName]; ok {
-				mv.ActiveCount = stats.ActiveCount
-				mv.ConnectingCount = stats.ConnectingCount
-				mv.HasFailed = stats.HasFailed
-				mv.BytesSent = stats.BytesSent
-				mv.BytesRecv = stats.BytesRecv
 			}
 
 			data.Machines = append(data.Machines, mv)

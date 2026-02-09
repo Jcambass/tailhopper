@@ -8,12 +8,11 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/internal/pac"
-	"github.com/jcambass/tailhopper/internal/socks"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string) {
 	baseDomain := tsServer.BaseDomain()
 	state := tsServer.State().Current()
 
@@ -56,21 +55,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	// Parse host and port from socksAddr
 	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 
-	// Build set of known machine names from peers
-	knownMachines := make(map[string]bool)
-	for _, peer := range status.Peer {
-		if len(peer.TailscaleIPs) == 0 {
-			continue
-		}
-		machineName := deriveMachineName(peer.DNSName, peer.HostName, baseDomain)
-		knownMachines[machineName] = true
-	}
-
-	// Get all connections, then classify at display time
-	recent, live := connLog.GetRecent(50)
-	allGroups := groupAllConnections(recent, live)
-	knownConnections, unknownConnections := classifyConnectionGroups(allGroups, baseDomain, knownMachines)
-
 	// Get our hostname from status
 	hostname := ""
 	if status.Self != nil {
@@ -78,14 +62,13 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	}
 
 	data := dashboardData{
-		BaseDomain:         baseDomain,
-		Hostname:           hostname,
-		SocksAddr:          socksAddr,
-		SocksHost:          socksHost,
-		SocksPort:          socksPort,
-		PACFileURL:         pac.URLPath,
-		Machines:           []machineView{},
-		UnknownConnections: unknownConnections,
+		BaseDomain: baseDomain,
+		Hostname:   hostname,
+		SocksAddr:  socksAddr,
+		SocksHost:  socksHost,
+		SocksPort:  socksPort,
+		PACFileURL: pac.URLPath,
+		Machines:   []machineView{},
 	}
 
 	for _, peer := range status.Peer {
@@ -108,15 +91,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 			StatusClass: statusClass,
 			StatusText:  statusText,
 			IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
-		}
-
-		// Merge connection stats if available
-		if stats, ok := knownConnections[machineName]; ok {
-			mv.ActiveCount = stats.ActiveCount
-			mv.ConnectingCount = stats.ConnectingCount
-			mv.HasFailed = stats.HasFailed
-			mv.BytesSent = stats.BytesSent
-			mv.BytesRecv = stats.BytesRecv
 		}
 
 		data.Machines = append(data.Machines, mv)

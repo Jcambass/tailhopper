@@ -1,5 +1,5 @@
 {{define "machine"}}
-<div class="machine {{if gt .ActiveCount 0}}has-active{{else if gt .ConnectingCount 0}}has-connecting{{else if .HasFailed}}has-failed{{end}}" data-machine="{{.Name}}" data-dnsname="{{.DNSName}}">
+<div class="machine" data-machine="{{.Name}}" data-dnsname="{{.DNSName}}">
   <div class="machine-header">
     <div class="machine-info">
       <div class="machine-name">
@@ -7,10 +7,6 @@
         {{.Name}}
       </div>
       <div class="machine-dns">{{.DNSName}}</div>
-    </div>
-    <div class="machine-stats-corner">
-      {{if gt .ActiveCount 0}}<span class="badge active">active</span>{{else if gt .ConnectingCount 0}}<span class="badge connecting">connecting</span>{{else if .HasFailed}}<span class="badge failed">failed</span>{{end}}
-      <span class="conn-data">↑{{formatBytes .BytesSent}} ↓{{formatBytes .BytesRecv}}</span>
     </div>
   </div>
   <div class="machine-addrs">IPs: {{.IPs}}</div>

@@ -8,7 +8,6 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/gui"
 	"github.com/jcambass/tailhopper/internal/pac"
-	"github.com/jcambass/tailhopper/internal/socks"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
@@ -18,11 +17,10 @@ type Server struct {
 	addr      string
 	tsServer  *ts.Server
 	socksAddr string
-	connLog   *socks.ConnectionLog
 }
 
 // NewServer creates and configures a new HTTP server.
-func NewServer(addr string, tsServer *ts.Server, socksAddr string, connLog *socks.ConnectionLog) *Server {
+func NewServer(addr string, tsServer *ts.Server, socksAddr string) *Server {
 	mux := http.NewServeMux()
 
 	// Static files
@@ -32,8 +30,7 @@ func NewServer(addr string, tsServer *ts.Server, socksAddr string, connLog *sock
 	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
 
 	// Partial endpoints for htmx
-	mux.Handle("/partials/connections", gui.HandleConnectionsPartial(connLog, tsServer))
-	mux.Handle("/partials/machines", gui.HandleMachinesPartial(tsServer, connLog))
+	mux.Handle("/partials/machines", gui.HandleMachinesPartial(tsServer))
 
 	// PAC file - uses BaseDomainGetter interface
 	mux.Handle(pac.URLPath, pac.Handler(tsServer, socksAddr))
@@ -41,7 +38,7 @@ func NewServer(addr string, tsServer *ts.Server, socksAddr string, connLog *sock
 	// Dashboard
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			gui.ServeDashboard(w, r, tsServer, socksAddr, connLog)
+			gui.ServeDashboard(w, r, tsServer, socksAddr)
 			return
 		}
 		http.Error(w, "not found", http.StatusNotFound)

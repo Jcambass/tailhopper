@@ -126,12 +126,5 @@
        hx-swap="innerHTML">
   {{template "machines" .}}
   </div>
-
-  <div id="unknown-connections-section"
-       hx-get="/partials/connections"
-       hx-trigger="every 2s"
-       hx-swap="innerHTML">
-    {{template "unknown_connections" .UnknownConnections}}
-  </div>
 </body>
 </html>
