@@ -128,8 +128,8 @@
        hx-swap="morph:innerHTML"
        hx-select="#card-body">
     <div class="tailnet-card">
-      <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}"></span>{{.BaseDomain}}</span>{{end}}</h2>
       <div id="card-body" class="card-body">
+        <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}"></span>🕸️ {{.BaseDomain}}</span>{{end}}</h2>
         {{if eq .StateClass "running"}}
         <!-- Running state: show machines list -->
         {{template "machines" .}}

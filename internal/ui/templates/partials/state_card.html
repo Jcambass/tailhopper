@@ -1,5 +1,4 @@
 {{define "state_card"}}
-{{if .IsHtmx}}<span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}" hx-swap-oob="outerHTML"></span>{{end}}
 {{if eq .StateClass "connecting"}}
   <!-- Connecting State Card -->
   <div class="state-body">

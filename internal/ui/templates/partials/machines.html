@@ -1,5 +1,4 @@
 {{define "machines"}}
-{{if .IsHtmx}}<span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}" hx-swap-oob="outerHTML"></span>{{end}}
 {{if .Machines}}
 {{range .Machines}}
 {{template "machine" .}}
