@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jcambass/tailhopper/pac"
-	"github.com/jcambass/tailhopper/socks"
-	"github.com/jcambass/tailhopper/ts"
+	"github.com/jcambass/tailhopper/internal/pac"
+	"github.com/jcambass/tailhopper/internal/socks"
+	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // ServeDashboard renders the main dashboard page.

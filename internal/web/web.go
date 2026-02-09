@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jcambass/tailhopper/gui"
-	"github.com/jcambass/tailhopper/pac"
-	"github.com/jcambass/tailhopper/socks"
-	"github.com/jcambass/tailhopper/ts"
+	"github.com/jcambass/tailhopper/internal/gui"
+	"github.com/jcambass/tailhopper/internal/pac"
+	"github.com/jcambass/tailhopper/internal/socks"
+	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // Server represents the HTTP server for Tailhopper.

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jcambass/tailhopper/socks"
-	"github.com/jcambass/tailhopper/ts"
+	"github.com/jcambass/tailhopper/internal/socks"
+	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // HandleMachinesPartial returns a handler for the machines partial.
