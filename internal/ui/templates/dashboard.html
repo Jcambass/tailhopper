@@ -7,9 +7,10 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/ui.css">
   <script src="/static/htmx.min.js"></script>
+  <script src="/static/idiomorph-ext.min.js"></script>
   <script src="/static/ui.js" defer></script>
 </head>
-<body>
+<body hx-ext="morph">
   <div class="dashboard-header">
     <svg class="hopper-icon" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -33,7 +34,7 @@
       <circle cx="40" cy="20" r="3" fill="#2E7D32" />
       <circle cx="41" cy="19" r="1" fill="#fff" />
       
-      <!-- Right eye -->
+      <!-- Right eye -->z
       <circle cx="60" cy="20" r="5" fill="#fff" />
       <circle cx="60" cy="20" r="3" fill="#2E7D32" />
       <circle cx="61" cy="19" r="1" fill="#fff" />
@@ -70,12 +71,8 @@
     </svg>
     <div class="header-text">
       <h1>Tailhopper Dashboard</h1>
-      {{if eq .StateClass "running"}}
-      <p class="machine-identity">Connected to <strong>{{.BaseDomain}}</strong> as <strong>{{.Hostname}}</strong></p>
-      {{else if ne .BaseDomain ""}}
-      <p class="machine-identity">Tailnet: <strong>{{.BaseDomain}}</strong></p>
-      {{else}}
-      <p class="machine-identity">Tailscale SOCKS5 Proxy</p>
+      {{if ne .Hostname ""}}
+      <p class="machine-identity">Connected as <strong>{{.Hostname}}</strong></p>
       {{end}}
     </div>
   </div>
@@ -127,9 +124,9 @@
   <div id="content-area"
        hx-get="/"
        hx-trigger="every 2s"
-       hx-swap="innerHTML"
+       hx-swap="morph"
        hx-select="#content-area">
-    <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag">{{.BaseDomain}}</span>{{end}}</h2>
+    <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span class="state-dot-inline state-{{.StateClass}}"></span>{{.BaseDomain}}</span>{{end}}</h2>
     {{if eq .StateClass "running"}}
     <!-- Running state: show machines list -->
     {{template "machines" .}}

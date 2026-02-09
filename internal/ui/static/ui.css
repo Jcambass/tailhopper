@@ -34,16 +34,18 @@
 .machines-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .tailnet-tag {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: #e7f1e3;
-  color: #2e5d2f;
+  background: #f5f5f5;
+  color: #555;
   font-size: 0.8em;
   font-weight: 600;
 }
@@ -173,15 +175,47 @@ h1 { color: #333; }
 
 .machine-status-dot.active {
   background: #4caf50;
-  animation: pulse 1.5s infinite;
 }
 
 .machine-status-dot.connecting {
   background: #ff9800;
-  animation: pulse 1s infinite;
 }
 
 .machine-status-dot.failed {
+  background: #f44336;
+}
+
+/* State dot for header */
+.state-dot-inline {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.state-dot-inline.state-running {
+  background: #4caf50;
+}
+
+.state-dot-inline.state-connecting {
+  background: #f44336;
+}
+
+.state-dot-inline.state-connecting-slow {
+  background: #f44336;
+}
+
+.state-dot-inline.state-needs-login {
+  background: #2196F3;
+}
+
+.state-dot-inline.state-needs-auth {
+  background: #2196F3;
+}
+
+.state-dot-inline.state-error {
   background: #f44336;
 }
 
@@ -256,6 +290,15 @@ h1 { color: #333; }
   }
   50% {
     transform: scaleY(0.8);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
   }
 }
 
@@ -466,19 +509,22 @@ h1 { color: #333; }
 
 .login-button {
   display: inline-block;
-  padding: 12px 28px;
+  padding: 10px 24px;
   background: #1976D2;
   color: white;
   text-decoration: none;
   border-radius: 6px;
   font-weight: 600;
-  font-size: 1.05em;
-  margin: 16px 0;
-  transition: background 0.2s;
+  font-size: 0.95em;
+  transition: all 0.2s ease;
 }
 
 .login-button:hover {
   background: #1565C0;
+}
+
+.login-button:active {
+  background: #0d47a1;
 }
 
 .auth-url-fallback {
@@ -585,10 +631,10 @@ h1 { color: #333; }
 }
 
 .state-message {
-  font-size: 1.1em;
-  color: #666;
+  font-size: 1em;
+  color: #555;
   margin: 15px 0 8px 0;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .state-note {
@@ -619,7 +665,7 @@ h1 { color: #333; }
 }
 
 .state-actions {
-  margin: 20px 0;
+  margin: 20px 0 0 0;
 }
 
 .state-card-connecting {

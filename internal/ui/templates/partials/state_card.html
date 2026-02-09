@@ -4,7 +4,7 @@
   <div class="state-card state-card-connecting">
     <div class="state-card-content">
       <div class="hopper-small-container">
-        <svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+        <svg id="hopper-connecting" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bodyGradGreen" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" style="stop-color:#7CB342;stop-opacity:1" />
@@ -36,7 +36,7 @@
           </g>
         </svg>
       </div>
-      <p class="state-message"><span class="state-pill state-connecting">Connecting...</span></p>
+      <p class="state-message">Connecting...</p>
     </div>
   </div>
 {{else if eq .StateClass "connecting-slow"}}
@@ -44,7 +44,7 @@
   <div class="state-card state-card-connecting">
     <div class="state-card-content">
       <div class="hopper-small-container">
-        <svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+        <svg id="hopper-connecting-slow" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bodyGradOrange" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" style="stop-color:#FFA726;stop-opacity:1" />
@@ -76,7 +76,7 @@
           </g>
         </svg>
       </div>
-      <p class="state-message"><span class="state-pill state-connecting-slow">Connecting...</span></p>
+      <p class="state-message">Connecting...</p>
       <p class="state-note">This is taking longer than usual. Check your network connectivity.</p>
     </div>
   </div>
@@ -85,7 +85,7 @@
   <div class="state-card state-card-login">
     <div class="state-card-content">
       <div class="hopper-small-container">
-        <svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+        <svg id="hopper-needs-login" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bodyGradBlue" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" style="stop-color:#42A5F5;stop-opacity:1" />
@@ -117,7 +117,7 @@
           </g>
         </svg>
       </div>
-      <p class="state-message"><span class="state-pill state-needs-login">Login Required</span></p>
+      <p class="state-message">Authentication required</p>
       <div class="state-actions">
         <a href="{{.AuthURL}}" target="_blank" class="login-button">Login with Tailscale</a>
       </div>
@@ -128,7 +128,7 @@
   <div class="state-card state-card-auth">
     <div class="state-card-content">
       <div class="hopper-small-container">
-        <svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+        <svg id="hopper-needs-auth" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bodyGradOrange2" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" style="stop-color:#FFA726;stop-opacity:1" />
@@ -160,7 +160,7 @@
           </g>
         </svg>
       </div>
-      <p class="state-message"><span class="state-pill state-needs-auth">Machine Auth Required</span></p>
+      <p class="state-message">Machine authorization required</p>
       <p class="state-note">Check the <a href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener">Tailscale admin console</a> to approve this machine.</p>
     </div>
   </div>
@@ -169,7 +169,7 @@
   <div class="state-card state-card-error">
     <div class="state-card-content">
       <div class="hopper-small-container">
-        <svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+        <svg id="hopper-error" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bodyGradRed" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" style="stop-color:#EF5350;stop-opacity:1" />
@@ -201,7 +201,7 @@
           </g>
         </svg>
       </div>
-      <p class="state-message"><span class="state-pill state-error">Error</span></p>
+      <p class="state-message">Connection error</p>
       <p class="state-error-details">{{.ErrorMsg}}</p>
       <p class="state-note">Please check your network connection and try restarting Tailhopper.</p>
     </div>
