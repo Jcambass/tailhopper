@@ -17,11 +17,34 @@ PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
 # Get home directory
 HOME_DIR="$HOME"
+PLIST_FILE="$HOME_DIR/Library/LaunchAgents/com.tailhopper.plist"
+
+# Check if already installed
+IS_INSTALLED=false
+if [ -f "$HOME_DIR/bin/tailhopper" ]; then
+    IS_INSTALLED=true
+fi
+
+if [ "$IS_INSTALLED" = true ]; then
+    echo -e "${YELLOW}⚠ Existing installation found. Updating...${NC}"
+    echo ""
+    
+    # Unload service before updating
+    if launchctl list com.tailhopper &>/dev/null; then
+        echo -e "${YELLOW}Stopping existing service...${NC}"
+        launchctl unload "$PLIST_FILE" || true
+    fi
+    echo ""
+else
+    echo -e "${YELLOW}Fresh installation${NC}"
+    echo ""
+fi
 
 # Create directories
 echo -e "${YELLOW}Creating directories...${NC}"
 mkdir -p "$HOME_DIR/bin"
-mkdir -p "$HOME_DIR/.tailhopper"
+mkdir -p "$HOME_DIR/Library/Application Support/Tailhopper"
+mkdir -p "$HOME_DIR/Library/Logs/Tailhopper"
 echo -e "${GREEN}✓ Directories created${NC}"
 echo ""
 
@@ -37,12 +60,17 @@ else
 fi
 echo ""
 
+# Copy uninstall script
+echo -e "${YELLOW}Copying uninstall script...${NC}"
+cp "$SCRIPT_DIR/uninstall.sh" "$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
+chmod +x "$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
+echo -e "${GREEN}✓ Uninstall script copied to: ${YELLOW}$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh${NC}"
+echo ""
+
 # Generate plist file
 echo -e "${YELLOW}Generating launchd plist...${NC}"
 LAUNCH_AGENTS_DIR="$HOME_DIR/Library/LaunchAgents"
 mkdir -p "$LAUNCH_AGENTS_DIR"
-
-PLIST_FILE="$LAUNCH_AGENTS_DIR/com.tailhopper.plist"
 
 # Read the template plist and substitute variables
 sed "s|{{HOME}}|$HOME_DIR|g" "$SCRIPT_DIR/com.tailhopper.plist" > "$PLIST_FILE"
@@ -54,12 +82,6 @@ else
     exit 1
 fi
 echo ""
-
-# Unload if already loaded
-if launchctl list com.tailhopper &>/dev/null; then
-    echo -e "${YELLOW}Unloading existing service...${NC}"
-    launchctl unload "$PLIST_FILE" || true
-fi
 
 # Load the service
 echo -e "${YELLOW}Loading service...${NC}"
@@ -73,14 +95,19 @@ else
 fi
 echo ""
 
-echo -e "${GREEN}Installation complete!${NC}"
+if [ "$IS_INSTALLED" = true ]; then
+    echo -e "${GREEN}Update complete!${NC}"
+else
+    echo -e "${GREEN}Installation complete!${NC}"
+fi
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"
-echo "  View logs:    tail -f $HOME_DIR/.tailhopper/tailhopper.log"
+echo "  View logs:    tail -f $HOME_DIR/Library/Logs/Tailhopper/tailhopper.log"
 echo "  Service status: launchctl list | grep tailhopper"
 echo "  Restart:      launchctl unload $PLIST_FILE && launchctl load $PLIST_FILE"
 echo "  Stop:         launchctl unload $PLIST_FILE"
+echo "  Uninstall:    $HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
 echo ""
 echo -e "${YELLOW}TailHopper is now running as a SOCKS5 proxy!${NC}"
-echo "  HTTP/GUI:     http://localhost:8888"
+echo "  UI:     http://localhost:8888"
 echo "  SOCKS5:       127.0.0.1:1080"

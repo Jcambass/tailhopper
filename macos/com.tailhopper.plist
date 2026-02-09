@@ -6,20 +6,21 @@
 	<string>com.tailhopper</string>
 	
 	<key>Program</key>
-	<string>/bin/bash</string>
+	<string>{{HOME}}/bin/tailhopper</string>
 	
 	<key>ProgramArguments</key>
 	<array>
-		<string>/bin/bash</string>
-		<string>-c</string>
-		<string>exec {{HOME}}/bin/tailhopper 2>&1</string>
+		<string>{{HOME}}/bin/tailhopper</string>
 	</array>
 	
 	<key>WorkingDirectory</key>
-	<string>{{HOME}}/.tailhopper</string>
+	<string>{{HOME}}/Library/Application Support/Tailhopper</string>
 	
 	<key>StandardOutPath</key>
-	<string>{{HOME}}/.tailhopper/tailhopper.log</string>
+	<string>{{HOME}}/Library/Logs/Tailhopper/tailhopper.log</string>
+	
+	<key>StandardErrorPath</key>
+	<string>{{HOME}}/Library/Logs/Tailhopper/tailhopper.log</string>
 	
 	<key>RunAtLoad</key>
 	<true/>
