@@ -72,6 +72,7 @@ type dashboardData struct {
 	StateClass string // "running", "error", "needs-login", "connecting"
 	AuthURL    string
 	ErrorMsg   string
+	IsHtmx     bool
 }
 
 // machineView represents a machine for display.

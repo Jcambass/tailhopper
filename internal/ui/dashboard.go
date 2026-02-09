@@ -28,6 +28,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
 		State:      state.State.String(),
+		IsHtmx:     r.Header.Get("HX-Request") != "",
 	}
 
 	// Handle non-running states - show dashboard with state card

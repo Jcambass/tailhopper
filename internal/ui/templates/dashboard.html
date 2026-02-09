@@ -124,16 +124,21 @@
   <div id="content-area"
        hx-get="/"
        hx-trigger="every 2s"
-       hx-swap="morph"
-       hx-select="#content-area">
-    <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span class="state-dot-inline state-{{.StateClass}}"></span>{{.BaseDomain}}</span>{{end}}</h2>
-    {{if eq .StateClass "running"}}
-    <!-- Running state: show machines list -->
-    {{template "machines" .}}
-    {{else}}
-    <!-- Non-running state: show state card -->
-    {{template "state_card" .}}
-    {{end}}
+       hx-target="#card-body"
+       hx-swap="morph:innerHTML"
+       hx-select="#card-body">
+    <div class="tailnet-card">
+      <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}"></span>{{.BaseDomain}}</span>{{end}}</h2>
+      <div id="card-body" class="card-body">
+        {{if eq .StateClass "running"}}
+        <!-- Running state: show machines list -->
+        {{template "machines" .}}
+        {{else}}
+        <!-- Non-running state: show state card -->
+        {{template "state_card" .}}
+        {{end}}
+      </div>
+    </div>
   </div>
 </body>
 </html>
