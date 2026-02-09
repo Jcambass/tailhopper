@@ -70,19 +70,6 @@ func (s *Server) saveCachedDomain(domain string) {
 	}
 }
 
-// clearCachedDomain removes the cached domain from memory and disk.
-func (s *Server) clearCachedDomain() {
-	s.mu.Lock()
-	s.cachedDomain = ""
-	s.mu.Unlock()
-
-	path := filepath.Join(s.stateDir, baseDomainFile)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		log.Printf("Failed to remove cached domain file: %v", err)
-	}
-	log.Printf("Cleared cached domain (re-authentication required)")
-}
-
 // startIPNWatcher watches for IPN state changes and updates the state machine.
 func (s *Server) startIPNWatcher() {
 	go func() {
@@ -120,7 +107,6 @@ func (s *Server) startIPNWatcher() {
 					s.state.SetRunning()
 				case ipn.NeedsLogin:
 					log.Printf("tsnet needs login")
-					s.clearCachedDomain()
 					// Get auth URL from status
 					if status, err := lc.Status(ctx); err == nil && status.AuthURL != "" {
 						log.Printf("Auth URL: %s", status.AuthURL)

@@ -53,6 +53,46 @@
   padding: 6px 14px;
 }
 
+/* State Pills/Tags */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+.state-pill.state-running {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.state-pill.state-connecting {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.state-pill.state-connecting-slow {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.state-pill.state-needs-login {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.state-pill.state-needs-auth {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.state-pill.state-error {
+  background: #ffebee;
+  color: #c62828;
+}
+
 body {
   font-family: system-ui, sans-serif;
   max-width: 800px;
@@ -203,7 +243,7 @@ h1 { color: #333; }
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-40px);
+    transform: translateY(-20px);
   }
 }
 
@@ -515,4 +555,108 @@ h1 { color: #333; }
   color: #999;
   font-size: 0.9em;
   margin: 0;
+}
+
+/* State Card Styles */
+.state-card {
+  background: #f9f9f9;
+  border: 1px dashed #ddd;
+  border-radius: 8px;
+  padding: 40px 20px;
+  margin: 20px 0;
+  text-align: center;
+}
+
+.state-card-content {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.hopper-small-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.hopper-small {
+  width: 80px;
+  height: 96px;
+  animation: hop 1.2s ease-in-out infinite;
+}
+
+.state-message {
+  font-size: 1.1em;
+  color: #666;
+  margin: 15px 0 8px 0;
+  font-weight: 600;
+}
+
+.state-note {
+  color: #999;
+  font-size: 0.9em;
+  margin: 10px 0;
+  line-height: 1.4;
+}
+
+.state-note a {
+  color: #1976d2;
+  text-decoration: underline;
+}
+
+.state-note a:hover {
+  color: #1565c0;
+}
+
+.state-error-details {
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 15px 0;
+  color: #c62828;
+  font-size: 0.9em;
+  word-break: break-word;
+}
+
+.state-actions {
+  margin: 20px 0;
+}
+
+.state-card-connecting {
+  /* Use same styling as base state-card */
+}
+
+.state-card-login {
+  /* Use same styling as base state-card */
+}
+
+.state-card-auth {
+  /* Use same styling as base state-card */
+}
+
+.state-card-error {
+  background: #ffebee;
+  border: 1px dashed #ffcdd2;
+}
+
+.login-button {
+  display: inline-block;
+  padding: 12px 28px;
+  background: #1976D2;
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 1em;
+  transition: all 0.2s ease;
+}
+
+.login-button:hover {
+  background: #1565C0;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(25, 118, 210, 0.3);
+}
+
+.login-button:active {
+  transform: translateY(0);
 }

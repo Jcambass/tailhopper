@@ -70,7 +70,13 @@
     </svg>
     <div class="header-text">
       <h1>Tailhopper Dashboard</h1>
+      {{if eq .StateClass "running"}}
       <p class="machine-identity">Connected to <strong>{{.BaseDomain}}</strong> as <strong>{{.Hostname}}</strong></p>
+      {{else if ne .BaseDomain ""}}
+      <p class="machine-identity">Tailnet: <strong>{{.BaseDomain}}</strong></p>
+      {{else}}
+      <p class="machine-identity">Tailscale SOCKS5 Proxy</p>
+      {{end}}
     </div>
   </div>
 
@@ -118,13 +124,19 @@
     </div>
   </div>
 
-  <h2 class="machines-title">Available Machines <span class="tailnet-tag">{{.BaseDomain}}</span></h2>
-
-  <div id="machines-list"
-       hx-get="/partials/machines"
+  <div id="content-area"
+       hx-get="/"
        hx-trigger="every 2s"
-       hx-swap="innerHTML">
-  {{template "machines" .}}
+       hx-swap="innerHTML"
+       hx-select="#content-area">
+    <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag">{{.BaseDomain}}</span>{{end}}</h2>
+    {{if eq .StateClass "running"}}
+    <!-- Running state: show machines list -->
+    {{template "machines" .}}
+    {{else}}
+    <!-- Non-running state: show state card -->
+    {{template "state_card" .}}
+    {{end}}
   </div>
 </body>
 </html>

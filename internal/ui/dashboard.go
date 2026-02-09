@@ -16,31 +16,75 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	baseDomain := tsServer.BaseDomain()
 	state := tsServer.State().Current()
 
-	// Handle non-running states
+	// Parse host and port from socksAddr
+	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+
+	// Base data structure
+	data := dashboardData{
+		BaseDomain: baseDomain,
+		SocksAddr:  socksAddr,
+		SocksHost:  socksHost,
+		SocksPort:  socksPort,
+		PACFileURL: pac.URLPath,
+		Machines:   []machineView{},
+		State:      state.State.String(),
+	}
+
+	// Handle non-running states - show dashboard with state card
 	switch state.State {
 	case ts.StateError:
 		log.Printf("dashboard: tsnet error: %v", state.Error)
-		showErrorPage(w, state.Error.Error())
+		data.StateClass = "error"
+		if state.Error != nil {
+			data.ErrorMsg = state.Error.Error()
+		}
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	case ts.StateNeedsLogin:
-		showLoginPage(w, state.AuthURL)
+		data.StateClass = "needs-login"
+		data.AuthURL = state.AuthURL
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	case ts.StateNeedsMachineAuth:
-		showMachineAuthPage(w)
+		data.StateClass = "needs-auth"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	case ts.StateConnectingSlow:
-		showSlowConnectionPage(w, baseDomain)
+		data.StateClass = "connecting-slow"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	case ts.StateConnecting:
-		showLoadingPage(w, baseDomain)
+		data.StateClass = "connecting"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	// StateRunning - show dashboard
+	// StateRunning - fetch machines
+	data.StateClass = "running"
+
 	lc, err := tsServer.LocalClient()
 	if err != nil {
 		log.Printf("dashboard: failed to get local client: %v", err)
-		showLoadingPage(w, baseDomain)
+		data.StateClass = "connecting"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -48,27 +92,17 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 	status, err := lc.Status(ctx)
 	if err != nil {
 		log.Printf("dashboard: failed to get status: %v", err)
-		showLoadingPage(w, baseDomain)
+		data.StateClass = "connecting"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	// Parse host and port from socksAddr
-	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
-
 	// Get our hostname from status
-	hostname := ""
 	if status.Self != nil {
-		hostname = status.Self.HostName
-	}
-
-	data := dashboardData{
-		BaseDomain: baseDomain,
-		Hostname:   hostname,
-		SocksAddr:  socksAddr,
-		SocksHost:  socksHost,
-		SocksPort:  socksPort,
-		PACFileURL: pac.URLPath,
-		Machines:   []machineView{},
+		data.Hostname = status.Self.HostName
 	}
 
 	for _, peer := range status.Peer {
@@ -106,76 +140,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
 		log.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-}
-
-func showLoadingPage(w http.ResponseWriter, baseDomain string) {
-	if baseDomain == "" {
-		baseDomain = "Tailscale"
-	}
-	data := struct {
-		BaseDomain string
-	}{
-		BaseDomain: baseDomain,
-	}
-
-	if err := renderTemplate(w, "loading.html", data); err != nil {
-		log.Printf("dashboard: failed to render loading template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-}
-
-func showErrorPage(w http.ResponseWriter, errMsg string) {
-	data := struct {
-		Error string
-	}{
-		Error: errMsg,
-	}
-
-	if err := renderTemplate(w, "error.html", data); err != nil {
-		log.Printf("dashboard: failed to render error template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-}
-
-func showSlowConnectionPage(w http.ResponseWriter, baseDomain string) {
-	if baseDomain == "" {
-		baseDomain = "Tailscale"
-	}
-	data := struct {
-		BaseDomain string
-	}{
-		BaseDomain: baseDomain,
-	}
-
-	if err := renderTemplate(w, "slow.html", data); err != nil {
-		log.Printf("dashboard: failed to render slow template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-}
-
-func showLoginPage(w http.ResponseWriter, authURL string) {
-	data := struct {
-		AuthURL string
-	}{
-		AuthURL: authURL,
-	}
-
-	if err := renderTemplate(w, "login.html", data); err != nil {
-		log.Printf("dashboard: failed to render login template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-}
-
-func showMachineAuthPage(w http.ResponseWriter) {
-	if err := renderTemplate(w, "machine_auth.html", nil); err != nil {
-		log.Printf("dashboard: failed to render machine auth template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
