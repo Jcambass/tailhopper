@@ -141,7 +141,21 @@
         {{template "machines" .}}
         {{else}}
         <!-- Non-connected state: show state card -->
-        {{template "state_card" .}}
+        {{if eq .StateClass "disabled"}}
+          {{template "state_card_disabled" .}}
+        {{else if eq .StateClass "disabling"}}
+          {{template "state_card_disabling" .}}
+        {{else if eq .StateClass "connecting"}}
+          {{template "state_card_connecting" .}}
+        {{else if eq .StateClass "connecting-slow"}}
+          {{template "state_card_connecting_slow" .}}
+        {{else if eq .StateClass "needs-login"}}
+          {{template "state_card_needs_login" .}}
+        {{else if eq .StateClass "needs-auth"}}
+          {{template "state_card_needs_auth" .}}
+        {{else if eq .StateClass "error"}}
+          {{template "state_card_error" .}}
+        {{end}}
         {{end}}
       </div>
     </div>
