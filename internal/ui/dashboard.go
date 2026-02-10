@@ -13,11 +13,23 @@ import (
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet, socksAddr string) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet) {
 	logger := logging.FromContext(r.Context()).With("component", "dashboard")
 
-	// Parse host and port from socksAddr
-	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+	// TODO: Move this to the tailnet section and do not show for disabled
+	// or do if we have it from the file anyway. Let's see.
+	var socksAddr string
+	var socksHost string
+	var socksPort string
+	if tailnet.State.Disabled() || tailnet.State.Disabling() {
+		socksAddr = "N/A"
+		socksHost = "N/A"
+		socksPort = "N/A"
+	} else {
+		// Parse host and port from socksAddr
+		socksAddr = tailnet.SocksAddr()
+		socksHost, socksPort, _ = net.SplitHostPort(socksAddr)
+	}
 
 	bestEffortSuffix := tailnet.State.BestEffortMagicDNSSuffix()
 	if bestEffortSuffix == "" {
@@ -47,6 +59,8 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet,
 	}
 
 	// For all other states, attempt to refresh the state machine and get the latest status from the tailnet.
+	// TODO: We used to enter the failed state if we failed to refresh the state, but that was a bit too aggressive and made it hard to recover from transient errors.
+	// But now we might mask problems?
 	status, err := tailnet.RefreshState(r.Context())
 	if err != nil {
 		// Will have set the state to failed, so just log the error here and continue to render the dashboard which will show the error state.

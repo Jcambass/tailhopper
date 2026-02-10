@@ -22,7 +22,7 @@ type Server struct {
 }
 
 // NewServer creates and configures a new HTTP server.
-func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
+func NewServer(addr string, tailnet *ts.Tailnet) *Server {
 	logger := logging.Default().With("component", "httpserver")
 	mux := http.NewServeMux()
 
@@ -33,12 +33,12 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
 
 	// PAC file
-	mux.Handle(pac.URLPath, withRequestLogging(pac.Handler(tailnet, socksAddr)))
+	mux.Handle(pac.URLPath, withRequestLogging(pac.Handler(tailnet)))
 
 	// Dashboard
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			ui.ServeDashboard(w, r, tailnet, socksAddr)
+			ui.ServeDashboard(w, r, tailnet)
 			return
 		}
 		http.Error(w, "not found", http.StatusNotFound)

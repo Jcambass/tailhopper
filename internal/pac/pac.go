@@ -19,13 +19,19 @@ func writePAC(w http.ResponseWriter, content string) {
 	w.Write([]byte(content))
 }
 
-func buildPACForSuffixes(suffixes []string, socksAddr string) string {
+func buildPACForTailnets(tailnets []*ts.Tailnet) string {
 	sb := strings.Builder{}
 	sb.WriteString("function FindProxyForURL(url, host) {\n")
-	for _, suffix := range suffixes {
+	for _, t := range tailnets {
+		// TODO: Remove?
+		if t.State.Disabled() || t.State.Disabling() {
+			continue
+		}
+		suffix := t.State.BestEffortMagicDNSSuffix()
 		if suffix == "" {
 			continue
 		}
+		socksAddr := t.SocksAddr()
 		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", suffix))
 		sb.WriteString(fmt.Sprintf("        return \"SOCKS5 %s; SOCKS %s; DIRECT\";\n", socksAddr, socksAddr))
 		sb.WriteString("    }\n")
@@ -36,13 +42,19 @@ func buildPACForSuffixes(suffixes []string, socksAddr string) string {
 	return sb.String()
 }
 
-func Handler(tailnet *ts.Tailnet, socksAddr string) http.HandlerFunc {
+func Handler(tailnet *ts.Tailnet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context()).With("component", "pac")
-		suffix := tailnet.State.BestEffortMagicDNSSuffix()
-		suffixes := []string{suffix}
+		tailnets := []*ts.Tailnet{tailnet}
+		writePAC(w, buildPACForTailnets(tailnets))
 
-		writePAC(w, buildPACForSuffixes(suffixes, socksAddr))
-		logger.Printf("Served PAC file with suffixes and socksAddr: %v, %s", suffixes, socksAddr)
+		tailnetSuffixes := []string{}
+		for _, t := range tailnets {
+			suffix := t.State.BestEffortMagicDNSSuffix()
+			if suffix != "" {
+				tailnetSuffixes = append(tailnetSuffixes, suffix)
+			}
+		}
+		logger.Printf("Served PAC file for tailnets: %v", tailnetSuffixes)
 	}
 }

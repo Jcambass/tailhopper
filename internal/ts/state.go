@@ -348,6 +348,7 @@ func (sm *stateMachine) SetConnected(ctx context.Context, reason string, magicDN
 	}
 }
 
+// TODO: Unused for now.. should we use it again?
 func (sm *stateMachine) SetFailed(ctx context.Context, reason string, err error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

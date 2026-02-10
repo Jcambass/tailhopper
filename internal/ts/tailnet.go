@@ -3,11 +3,13 @@ package ts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
+	"github.com/jcambass/tailhopper/internal/socks"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
@@ -20,8 +22,10 @@ type Tailnet struct {
 	State  *stateMachine
 	logger *logging.Logger
 
-	server      *tsnet.Server
-	watcher     *watcher
+	server     *tsnet.Server
+	watcher    *watcher
+	socksProxy *socks.Server
+
 	lifecycleMu *sync.RWMutex
 }
 
@@ -29,6 +33,7 @@ func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
+
 	return &Tailnet{
 		tsnetStateDir: tsnetStateDir,
 		Hostname:      hostname,
@@ -63,15 +68,24 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		Hostname: t.Hostname,
 	}
 
+	socksProxy, err := socks.NewServer(t.Dial)
+	if err != nil {
+		logger.Printf("failed to start SOCKS5 proxy: %v", err)
+		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
+		return err
+	}
+	t.socksProxy = socksProxy
+	t.socksProxy.Start()
+
 	// start IPN watcher to observe state changes
 	t.watcher = newWatcher(t)
 	t.watcher.Start()
 
 	// Asynchronously start the server
-	err := t.server.Start()
+	err = t.server.Start()
 	if err != nil {
 		logger.Printf("failed to start tsnet server: %v", err)
-		t.State.SetFailed(ctx, "tailnet_start_failed", err)
+		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
 		return err
 	}
 
@@ -107,6 +121,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	if t.watcher != nil {
 		logger.Printf("Stopping watcher")
 		t.watcher.Stop()
+		t.watcher = nil
 		logger.Printf("Watcher stopped")
 	}
 	if t.server != nil {
@@ -116,7 +131,19 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 			logger.Printf("failed to close tsnet server: %v", err)
 			return err
 		}
+		t.server = nil
 		logger.Printf("tsnet server stopped")
+	}
+
+	if t.socksProxy != nil {
+		logger.Printf("Stopping SOCKS5 proxy")
+		err := t.socksProxy.Close()
+		if err != nil {
+			logger.Printf("failed to close SOCKS5 proxy: %v", err)
+			return err
+		}
+		t.socksProxy = nil
+		logger.Printf("SOCKS5 proxy stopped")
 	}
 
 	// Set disabled after the server and watcher are fully stopped.
@@ -148,7 +175,6 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	if err != nil {
 		err = errors.New("failed to get local client: " + err.Error())
 		logger.Println(err.Error())
-		t.State.SetFailed(ctx, "refresh_state", err)
 
 		return nil, err
 	}
@@ -157,7 +183,6 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	if err != nil {
 		err = errors.New("failed to get status: " + err.Error())
 		logger.Println(err.Error())
-		t.State.SetFailed(ctx, "refresh_state", err)
 
 		return nil, err
 	}
@@ -166,7 +191,6 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	if status == nil {
 		err = errors.New("failed to get status: status is nil")
 		logger.Println(err.Error())
-		t.State.SetFailed(ctx, "refresh_state", err)
 
 		return nil, err
 	}
@@ -219,4 +243,12 @@ func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, 
 	}
 
 	return t.server.Dial(ctx, network, address)
+}
+
+func (t *Tailnet) SocksAddr() string {
+	if t.socksProxy == nil {
+		panic("socks proxy is not initialized")
+	}
+
+	return t.socksProxy.Addr()
 }

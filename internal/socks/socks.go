@@ -21,8 +21,8 @@ type Server struct {
 }
 
 // NewServer creates a new SOCKS5 server.
-func NewServer(addr string, dial Dialer) (*Server, error) {
-	listener, err := net.Listen("tcp", addr)
+func NewServer(dial Dialer) (*Server, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func NewServer(addr string, dial Dialer) (*Server, error) {
 			Dialer: dial,
 		},
 		listener: listener,
-		addr:     addr,
+		addr:     listener.Addr().String(),
 		logger:   logger,
 	}, nil
 }
