@@ -21,8 +21,7 @@ var (
 
 func init() {
 	var err error
-	funcMap := template.FuncMap{}
-	templates, err = template.New("").Funcs(funcMap).ParseFS(uiFS, "templates/*.html", "templates/partials/*.html")
+	templates, err = template.New("").ParseFS(uiFS, "templates/*.html", "templates/partials/*.html")
 	if err != nil {
 		panic(err)
 	}

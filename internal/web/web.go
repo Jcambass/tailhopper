@@ -16,11 +16,9 @@ import (
 
 // Server represents the HTTP server for Tailhopper.
 type Server struct {
-	server    *http.Server
-	addr      string
-	tailnet   *ts.Tailnet
-	socksAddr string
-	logger    *logging.Logger
+	server *http.Server
+	addr   string
+	logger *logging.Logger
 }
 
 // NewServer creates and configures a new HTTP server.
@@ -76,7 +74,6 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	// do not use request logging for now
 	rootHandler := withRequestContext(withRecovery(mux))
 
 	return &Server{
@@ -115,45 +112,6 @@ func withRequestContext(next http.Handler) http.Handler {
 		ctx = logging.WithContext(ctx, logger)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func withRequestLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		writer := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(writer, r)
-
-		logger := logging.FromContext(r.Context())
-		logger.Printf("method=%s path=%s status=%d bytes=%d duration=%s remote=%s ua=%q",
-			r.Method,
-			r.URL.Path,
-			writer.status,
-			writer.bytes,
-			time.Since(start),
-			r.RemoteAddr,
-			r.UserAgent(),
-		)
-	})
-}
-
-type loggingResponseWriter struct {
-	http.ResponseWriter
-	status int
-	bytes  int
-}
-
-func (w *loggingResponseWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *loggingResponseWriter) Write(data []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	count, err := w.ResponseWriter.Write(data)
-	w.bytes += count
-	return count, err
 }
 
 func newRequestID() string {
