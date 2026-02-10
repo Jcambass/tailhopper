@@ -19,9 +19,12 @@ PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 HOME_DIR="$HOME"
 PLIST_FILE="$HOME_DIR/Library/LaunchAgents/com.tailhopper.plist"
 
+# Installation directory
+INSTALL_DIR="$HOME_DIR/.local/bin"
+
 # Check if already installed
 IS_INSTALLED=false
-if [ -f "$HOME_DIR/bin/tailhopper" ]; then
+if [ -f "$INSTALL_DIR/tailhopper" ]; then
     IS_INSTALLED=true
 fi
 
@@ -42,7 +45,7 @@ fi
 
 # Create directories
 echo -e "${YELLOW}Creating directories...${NC}"
-mkdir -p "$HOME_DIR/bin"
+mkdir -p "$INSTALL_DIR"
 mkdir -p "$HOME_DIR/Library/Application Support/Tailhopper"
 mkdir -p "$HOME_DIR/Library/Logs/Tailhopper"
 echo -e "${GREEN}✓ Directories created${NC}"
@@ -51,9 +54,9 @@ echo ""
 # Build the binary
 echo -e "${YELLOW}Building tailhopper binary...${NC}"
 cd "$PROJECT_ROOT"
-go build -o "$HOME_DIR/bin/tailhopper" ./cmd/tailhopper
+go build -o "$INSTALL_DIR/tailhopper" ./cmd/tailhopper
 if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ Binary built successfully${NC}"
+    echo -e "${GREEN}✓ Binary built to $INSTALL_DIR/tailhopper${NC}"
 else
     echo -e "${RED}Error: Failed to build binary${NC}"
     exit 1
@@ -62,9 +65,33 @@ echo ""
 
 # Copy uninstall script
 echo -e "${YELLOW}Copying uninstall script...${NC}"
-cp "$SCRIPT_DIR/uninstall.sh" "$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
-chmod +x "$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
-echo -e "${GREEN}✓ Uninstall script copied to: ${YELLOW}$HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh${NC}"
+cp "$SCRIPT_DIR/uninstall.sh" "$INSTALL_DIR/tailhopper-uninstall"
+chmod +x "$INSTALL_DIR/tailhopper-uninstall"
+echo -e "${GREEN}✓ Uninstall script copied to: ${YELLOW}$INSTALL_DIR/tailhopper-uninstall${NC}"
+echo ""
+
+# Create logs viewing script
+echo -e "${YELLOW}Creating logs viewing script...${NC}"
+cat > "$INSTALL_DIR/tailhopper-logs" <<'LOGS_SCRIPT'
+#!/bin/bash
+
+# Colors for output
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+LOG_FILE="$HOME/Library/Logs/Tailhopper/tailhopper.log"
+
+if [ ! -f "$LOG_FILE" ]; then
+    echo -e "${YELLOW}Log file not found: $LOG_FILE${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}Viewing TailHopper logs (Ctrl+C to exit)...${NC}"
+echo ""
+tail -f "$LOG_FILE"
+LOGS_SCRIPT
+chmod +x "$INSTALL_DIR/tailhopper-logs"
+echo -e "${GREEN}✓ Logs script created at: ${YELLOW}$INSTALL_DIR/tailhopper-logs${NC}"
 echo ""
 
 # Generate plist file
@@ -102,12 +129,12 @@ else
 fi
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"
-echo "  View logs:    tail -f $HOME_DIR/Library/Logs/Tailhopper/tailhopper.log"
+echo "  View logs:      tailhopper-logs"
 echo "  Service status: launchctl list | grep tailhopper"
-echo "  Restart:      launchctl unload $PLIST_FILE && launchctl load $PLIST_FILE"
-echo "  Stop:         launchctl unload $PLIST_FILE"
-echo "  Uninstall:    $HOME_DIR/Library/Application Support/Tailhopper/uninstall.sh"
+echo "  Restart:        launchctl unload $PLIST_FILE && launchctl load $PLIST_FILE"
+echo "  Stop:           launchctl unload $PLIST_FILE"
+echo "  Uninstall:      tailhopper-uninstall"
 echo ""
 echo -e "${YELLOW}TailHopper is now running as a SOCKS5 proxy!${NC}"
 echo "  UI:     http://localhost:8888"
-echo "  SOCKS5:       127.0.0.1:1080"
+echo "  SOCKS5: 127.0.0.1:1080"

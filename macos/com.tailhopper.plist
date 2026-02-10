@@ -6,11 +6,11 @@
 	<string>com.tailhopper</string>
 	
 	<key>Program</key>
-	<string>{{HOME}}/bin/tailhopper</string>
+	<string>{{HOME}}/.local/bin/tailhopper</string>
 	
 	<key>ProgramArguments</key>
 	<array>
-		<string>{{HOME}}/bin/tailhopper</string>
+		<string>{{HOME}}/.local/bin/tailhopper</string>
 	</array>
 	
 	<key>WorkingDirectory</key>

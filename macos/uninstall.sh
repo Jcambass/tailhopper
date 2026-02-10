@@ -13,8 +13,11 @@ echo ""
 
 # Get home directory
 HOME_DIR="$HOME"
+INSTALL_DIR="$HOME_DIR/.local/bin"
 PLIST_FILE="$HOME_DIR/Library/LaunchAgents/com.tailhopper.plist"
-BINARY_PATH="$HOME_DIR/bin/tailhopper"
+BINARY_PATH="$INSTALL_DIR/tailhopper"
+UNINSTALL_SCRIPT="$INSTALL_DIR/tailhopper-uninstall"
+LOGS_SCRIPT="$INSTALL_DIR/tailhopper-logs"
 STATE_DIR="$HOME_DIR/Library/Application Support/Tailhopper"
 LOG_DIR="$HOME_DIR/Library/Logs/Tailhopper"
 
@@ -39,6 +42,22 @@ if [ -f "$BINARY_PATH" ]; then
     echo -e "${YELLOW}Removing binary...${NC}"
     rm "$BINARY_PATH"
     echo -e "${GREEN}✓ Binary removed${NC}"
+fi
+echo ""
+
+# Remove uninstall script
+if [ -f "$UNINSTALL_SCRIPT" ]; then
+    echo -e "${YELLOW}Removing uninstall script...${NC}"
+    rm "$UNINSTALL_SCRIPT"
+    echo -e "${GREEN}✓ Uninstall script removed${NC}"
+fi
+echo ""
+
+# Remove logs script
+if [ -f "$LOGS_SCRIPT" ]; then
+    echo -e "${YELLOW}Removing logs script...${NC}"
+    rm "$LOGS_SCRIPT"
+    echo -e "${GREEN}✓ Logs script removed${NC}"
 fi
 echo ""
 
