@@ -1,0 +1,41 @@
+{{define "tailnet_tag_inner"}}
+  <span class="tailnet-tag{{if eq .BaseDomain ""}} is-hidden{{end}}"><span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}"></span>🕸️ {{.BaseDomain}}</span>
+{{end}}
+
+{{define "tailnet_tag"}}
+  <h2 class="machines-title" id="tailnet-tag">{{template "tailnet_tag_inner" .}}</h2>
+{{end}}
+
+{{define "tailnet_tag_oob"}}
+  <h2 class="machines-title" id="tailnet-tag" hx-swap-oob="outerHTML">{{template "tailnet_tag_inner" .}}</h2>
+{{end}}
+
+{{define "tailnet_toggle_inner"}}
+  <input
+    type="checkbox"
+    name="enabled"
+    aria-label="Tailnet connection"
+    hx-post="/tailnet/toggle"
+    hx-trigger="change"
+    hx-swap="none"
+    {{if ne .StateClass "disabled"}}checked{{end}}
+  >
+  <span class="toggle-slider"></span>
+{{end}}
+
+{{define "tailnet_toggle"}}
+  <label id="tailnet-toggle" class="tailnet-toggle" title="Disconnect from tailnet">
+    {{template "tailnet_toggle_inner" .}}
+  </label>
+{{end}}
+
+{{define "tailnet_toggle_oob"}}
+  <label id="tailnet-toggle" class="tailnet-toggle" title="Disconnect from tailnet" hx-swap-oob="outerHTML">
+    {{template "tailnet_toggle_inner" .}}
+  </label>
+{{end}}
+
+{{define "tailnet_header"}}
+  {{template "tailnet_tag" .}}
+  {{template "tailnet_toggle" .}}
+{{end}}

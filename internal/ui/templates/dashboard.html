@@ -121,28 +121,20 @@
     </div>
   </div>
 
-  <div id="content-area"
-       hx-get="/"
-       hx-trigger="every 2s"
-       hx-target="#card-body"
-       hx-swap="morph:innerHTML"
-       hx-select="#card-body">
-    <div class="tailnet-card">
+  <div class="tailnet-card">
+    <div class="tailnet-header">
+      {{template "tailnet_header" .}}
+    </div>
+    <div id="content-area"
+         hx-get="/"
+         hx-trigger="every 2s"
+         hx-target="#card-body"
+         hx-swap="morph:innerHTML"
+         hx-select="#card-body">
       <div id="card-body" class="card-body">
-        <div class="tailnet-header">
-          <h2 class="machines-title">{{if ne .BaseDomain ""}}<span class="tailnet-tag"><span id="tailnet-state-dot" class="state-dot-inline state-{{.StateClass}}"></span>🕸️ {{.BaseDomain}}</span>{{end}}</h2>
-          <label class="tailnet-toggle" title="Disconnect from tailnet">
-            <input
-              type="checkbox"
-              name="enabled"
-              aria-label="Tailnet connection"
-              hx-post="/tailnet/toggle"
-              hx-trigger="change"
-              hx-swap="none"
-              {{if ne .StateClass "disabled"}}checked{{end}}
-            >
-            <span class="toggle-slider"></span>
-          </label>
+        <div hidden>
+          {{template "tailnet_tag_oob" .}}
+          {{template "tailnet_toggle_oob" .}}
         </div>
         {{if eq .StateClass "connected"}}
         <!-- connected state: show machines list -->

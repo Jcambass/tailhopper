@@ -65,6 +65,10 @@
   font-weight: 500;
 }
 
+.tailnet-tag.is-hidden {
+  display: none;
+}
+
 body {
   font-family: system-ui, sans-serif;
   max-width: 800px;
@@ -188,6 +192,15 @@ h1 {
   display: inline-flex;
   align-items: center;
   cursor: pointer;
+}
+
+.tailnet-toggle.is-pending {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.tailnet-toggle.is-pending .toggle-slider {
+  box-shadow: inset 0 0 0 1px #bdbdbd;
 }
 
 .tailnet-toggle input {

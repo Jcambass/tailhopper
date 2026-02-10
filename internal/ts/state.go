@@ -1,10 +1,11 @@
 package ts
 
 import (
-	"errors"
-	"log"
+	"context"
 	"sync"
 	"time"
+
+	"github.com/jcambass/tailhopper/internal/logging"
 )
 
 // state represents the current tsnet connection state.
@@ -62,33 +63,14 @@ func newStateMachine() *stateMachine {
 	sm := &stateMachine{
 		mu: &sync.RWMutex{},
 	}
-	sm.SetDisabled()
+	sm.SetDisabled(context.Background())
 	return sm
 }
 
-func (sm *stateMachine) AuthURL() string {
+func (sm *stateMachine) Description() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.authURL
-}
-
-func (sm *stateMachine) Error() error {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.err
-}
-
-func (sm *stateMachine) MagicDNSSuffix() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.magicDNSSuffix
-}
-
-// State getters
-func (sm *stateMachine) Current() state {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.state
+	return sm.state.String()
 }
 
 func (sm *stateMachine) Disabled() bool {
@@ -109,51 +91,49 @@ func (sm *stateMachine) SlowConnecting() bool {
 	return sm.state == StateConnectingSlow
 }
 
-func (sm *stateMachine) NeedsLogin() bool {
+func (sm *stateMachine) NeedsLogin() (bool, string) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.state == StateNeedsLogin
+	if sm.state == StateNeedsLogin {
+		return true, sm.authURL
+	}
+	return false, ""
+}
+func (sm *stateMachine) NeedsMachineAuth() (bool, string) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.state == StateNeedsMachineAuth {
+		return true, sm.magicDNSSuffix
+	}
+	return false, ""
 }
 
-func (sm *stateMachine) NeedsMachineAuth() bool {
+func (sm *stateMachine) Connected() (bool, string) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.state == StateNeedsMachineAuth
+	if sm.state == StateConnected {
+		return true, sm.magicDNSSuffix
+	}
+	return false, ""
 }
 
-func (sm *stateMachine) Connected() bool {
+func (sm *stateMachine) Failed() (bool, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.state == StateConnected
-}
-
-func (sm *stateMachine) Failed() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.state == StateFailed
+	if sm.state == StateFailed {
+		return true, sm.err
+	}
+	return false, nil
 }
 
 // State transitions
-
-type StateTransitionError struct {
-	From state
-	To   state
-}
-
-func (e *StateTransitionError) Error() string {
-	return "invalid state transition from " + e.From.String() + " to " + e.To.String()
-}
-
-func (sm *stateMachine) SetDisabled() error {
+func (sm *stateMachine) SetDisabled(ctx context.Context) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.state == StateDisabled {
-		return nil // No transition needed
+		return // No transition needed
 	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	sm.state = StateDisabled
 	sm.authURL = ""
@@ -162,19 +142,19 @@ func (sm *stateMachine) SetDisabled() error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }
 
 var slowTimeout = 10 * time.Second
 
-func (sm *stateMachine) SetConnecting() error {
+func (sm *stateMachine) SetConnecting(ctx context.Context, reason string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> Connecting\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> Connecting (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateConnecting {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	// Trying to transition to connecting from slow connecting does noop.
@@ -182,7 +162,7 @@ func (sm *stateMachine) SetConnecting() error {
 	// From tailscales perspective we're transitioning from connecting to connecting, so we ignore the transition.
 	// From our perspective we stay in slow connecting until we transition to a different state, at which point we reset the slow timer.
 	if sm.state == StateConnectingSlow {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	// All other transitions to connecting are valid
@@ -198,29 +178,24 @@ func (sm *stateMachine) SetConnecting() error {
 	}
 
 	sm.slowTimer = time.AfterFunc(slowTimeout, func() {
-		sm.mu.RLock()
-		defer sm.mu.RUnlock()
-
-		if sm.Current() == StateConnecting {
-			sm.SetConnectingSlow()
-		}
+		sm.setConnectingSlow(ctx, "slow timeout reached")
 	})
-
-	return nil
 }
 
-func (sm *stateMachine) SetConnectingSlow() error {
+// NOTE: This is **special** and must only be called from SetConnecting!
+func (sm *stateMachine) setConnectingSlow(ctx context.Context, reason string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> ConnectingSlow\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> ConnectingSlow (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateConnectingSlow {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	if sm.state != StateConnecting {
-		return &StateTransitionError{From: sm.state, To: StateConnectingSlow}
+		return // Ignore and do nothing. The state may have changed in the meantime.
 	}
 
 	sm.state = StateConnectingSlow
@@ -230,25 +205,25 @@ func (sm *stateMachine) SetConnectingSlow() error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }
 
-func (sm *stateMachine) SetNeedsLogin(authURL string) error {
+func (sm *stateMachine) SetNeedsLogin(ctx context.Context, reason string, authURL string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> NeedsLogin\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> NeedsLogin (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateNeedsLogin && sm.authURL == authURL {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	if sm.state != StateConnecting && sm.state != StateConnectingSlow {
-		return &StateTransitionError{From: sm.state, To: StateNeedsLogin}
+		panic("invalid state transition to NeedsLogin from state " + sm.state.String())
 	}
 
 	if authURL == "" {
-		return errors.New("authURL cannot be empty when setting state to NeedsLogin")
+		panic("authURL cannot be empty when setting state to NeedsLogin")
 	}
 
 	// TODO: Should we reset magicDNSSuffix on require login?
@@ -260,25 +235,25 @@ func (sm *stateMachine) SetNeedsLogin(authURL string) error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }
 
-func (sm *stateMachine) SetNeedsMachineAuth(magicDNSSuffix string) error {
+func (sm *stateMachine) SetNeedsMachineAuth(ctx context.Context, reason string, magicDNSSuffix string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> NeedsMachineAuth\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> NeedsMachineAuth (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateNeedsMachineAuth {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	if sm.state != StateNeedsLogin {
-		return &StateTransitionError{From: sm.state, To: StateNeedsMachineAuth}
+		panic("invalid state transition to NeedsMachineAuth from state " + sm.state.String())
 	}
 
 	if magicDNSSuffix == "" {
-		return errors.New("magicDNSSuffix cannot be empty when setting state to NeedsMachineAuth")
+		panic("magicDNSSuffix cannot be empty when setting state to NeedsMachineAuth")
 	}
 
 	// Not reset on most transitions!
@@ -291,25 +266,25 @@ func (sm *stateMachine) SetNeedsMachineAuth(magicDNSSuffix string) error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }
 
-func (sm *stateMachine) SetConnected(magicDNSSuffix string) error {
+func (sm *stateMachine) SetConnected(ctx context.Context, reason string, magicDNSSuffix string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> Connected\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> Connected (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateConnected {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	if sm.state != StateConnecting && sm.state != StateConnectingSlow && sm.state != StateNeedsLogin && sm.state != StateNeedsMachineAuth {
-		return &StateTransitionError{From: sm.state, To: StateConnected}
+		panic("invalid state transition to Connected from state " + sm.state.String())
 	}
 
 	if magicDNSSuffix == "" {
-		return errors.New("magicDNSSuffix cannot be empty when setting state to Connected")
+		panic("magicDNSSuffix cannot be empty when setting state to Connected")
 	}
 
 	// Not reset on most transitions!
@@ -322,21 +297,21 @@ func (sm *stateMachine) SetConnected(magicDNSSuffix string) error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }
 
-func (sm *stateMachine) SetFailed(err error) error {
+func (sm *stateMachine) SetFailed(ctx context.Context, reason string, err error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	log.Printf("State transition: %s -> Failed\n", sm.state.String())
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> Failed (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateFailed {
-		return nil // No transition needed
+		return // No transition needed
 	}
 
 	if err == nil {
-		return errors.New("err cannot be nil when setting state to Failed")
+		panic("err cannot be nil when setting state to Failed")
 	}
 
 	sm.state = StateFailed
@@ -346,5 +321,4 @@ func (sm *stateMachine) SetFailed(err error) error {
 		sm.slowTimer.Stop()
 		sm.slowTimer = nil
 	}
-	return nil
 }

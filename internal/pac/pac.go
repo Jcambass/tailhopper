@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
@@ -13,11 +14,13 @@ const URLPath = "/proxy.pac"
 
 func Handler(tailnet *ts.Tailnet, socksAddr string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if tailnet.State.Connected() {
+		logger := logging.FromContext(r.Context()).With("component", "pac")
+		connected, suffix := tailnet.State.Connected()
+		if !connected {
 			http.Error(w, "not connected to Tailnet yet", http.StatusServiceUnavailable)
+			logger.Printf("PAC requested while tailnet disconnected")
 			return
 		}
-		suffix := tailnet.State.MagicDNSSuffix()
 
 		content := fmt.Sprintf(`function FindProxyForURL(url, host) {
     // Route all *.%s traffic through SOCKS5 proxy

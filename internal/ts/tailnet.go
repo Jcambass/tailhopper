@@ -3,37 +3,44 @@ package ts
 import (
 	"context"
 	"errors"
-	"log"
+	"net"
 
+	"github.com/jcambass/tailhopper/internal/logging"
+	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
-	"net"
 )
 
 type Tailnet struct {
 	tsnetStateDir string
 	Hostname      string
 
-	State *stateMachine
+	State  *stateMachine
+	logger *logging.Logger
 
 	server  *tsnet.Server
 	watcher *watcher
 }
 
-func NewTailnet(tsnetStateDir string, hostname string) *Tailnet {
+func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *Tailnet {
+	if logger == nil {
+		logger = logging.Default().With("component", "tailnet")
+	}
 	return &Tailnet{
 		tsnetStateDir: tsnetStateDir,
 		Hostname:      hostname,
 		State:         newStateMachine(),
+		logger:        logger,
 	}
 }
 
-func (t *Tailnet) Start() error {
+func (t *Tailnet) Start(ctx context.Context) error {
 	if !t.State.Disabled() {
 		return errors.New("tailnet that is not disabled cannot be started")
 	}
 
-	log.Printf("Starting tailnet")
+	logger := logging.FromContext(ctx).With("component", "tailnet")
+	logger.Printf("Starting tailnet")
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
@@ -47,81 +54,113 @@ func (t *Tailnet) Start() error {
 	// Asynchronously start the server
 	err := t.server.Start()
 	if err != nil {
-		log.Printf("failed to start tsnet server: %v", err)
-		err := t.State.SetFailed(err)
-		if err != nil {
-			log.Printf("failed to set state to failed: %v", err)
-		}
+		logger.Printf("failed to start tsnet server: %v", err)
+		t.State.SetFailed(ctx, "tailnet_start_failed", err)
 		return err
 	}
+
+	// Explicitly set the status to connecting
+	t.State.SetConnecting(ctx, "tailnet_start")
 
 	return nil
 }
 
-func (t *Tailnet) Stop() error {
+func (t *Tailnet) Stop(ctx context.Context) error {
 	if t.State.Disabled() {
 		return errors.New("tailnet that is disabled cannot be stopped")
 	}
 
-	log.Printf("Stopping tailnet")
+	logger := logging.FromContext(ctx).With("component", "tailnet")
+	logger.Printf("Stopping tailnet")
+
+	// Explicitly set state to disabled on stop before stopping the server and watcher to ensure
+	// that any in-flight operations are aware of the disabled state and don't try to interact with the server or dial new connections.
+	t.State.SetDisabled(ctx)
 
 	if t.watcher != nil {
+		logger.Printf("Stopping IPN watcher")
 		t.watcher.Stop()
+		logger.Printf("IPN watcher stopped")
 	}
 	if t.server != nil {
+		logger.Printf("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
-			log.Printf("failed to close tsnet server: %v", err)
+			logger.Printf("failed to close tsnet server: %v", err)
 			return err
 		}
+		logger.Printf("tsnet server stopped")
 	}
 
-	// Explicitly set state to disabled on stop.
-	err := t.State.SetDisabled()
-	if err != nil {
-		log.Printf("failed to set state to disabled: %v", err)
-		return err
-	}
+	logger.Printf("Tailnet stopped successfully")
 
 	return nil
 }
 
-func (t *Tailnet) Status(ctx context.Context) (*ipnstate.Status, error) {
-	if t.State.Disabled() {
-		return nil, errors.New("tailnet that is disabled cannot get status")
-	}
+func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
+	logger := logging.FromContext(ctx).With("component", "tailnet")
+	logger.Printf("Refreshing tailnet state")
 
-	log.Println("Getting tailnet status")
+	if t.State.Disabled() {
+		return nil, errors.New("tailnet that is disabled cannot refresh state")
+	}
 
 	lc, err := t.server.LocalClient()
 	if err != nil {
-		log.Printf("failed to get local client: %v", err)
-		log.Printf("Setting state to failed due to local client error")
-		err := t.State.SetFailed(err)
-		if err != nil {
-			log.Printf("failed to set state to failed: %v", err)
-		}
+		err = errors.New("failed to get local client: " + err.Error())
+		logger.Println(err.Error())
+		t.State.SetFailed(ctx, "refresh_state", err)
+
 		return nil, err
 	}
 
 	status, err := lc.Status(ctx)
 	if err != nil {
-		log.Printf("failed to get status: %v", err)
-		log.Printf("Setting state to failed due to status error")
-		err := t.State.SetConnecting() // Set to connecting on error
-		if err != nil {
-			log.Printf("failed to set state to connecting: %v", err)
-		}
+		err = errors.New("failed to get status: " + err.Error())
+		logger.Println(err.Error())
+		t.State.SetFailed(ctx, "refresh_state", err)
+
 		return nil, err
 	}
 
-	// Update our hostname from status.Self if available
+	// If the status is nil also fail
+	if status == nil {
+		err = errors.New("failed to get status: status is nil")
+		logger.Println(err.Error())
+		t.State.SetFailed(ctx, "refresh_state", err)
+
+		return nil, err
+	}
+
+	logger.Println("Tailnet state fetched successfully")
+
 	if status.Self != nil {
-		log.Printf("Updating hostname from status: %s", status.Self.HostName)
+		logger.Printf("Updating hostname from status: %s", status.Self.HostName)
 		t.Hostname = status.Self.HostName
 	}
 
-	log.Printf("Tailnet status retrieved successfully: %v", status)
+	// TODO: Guard against connecting to a different tailnet than we had before?
+
+	logger.Printf("Updating state machine based on backend state: %s", status.BackendState)
+	switch status.BackendState {
+	case ipn.NoState.String(), ipn.Stopped.String():
+		// TODO: We can't set disabled here since that's different?
+		// What should we do?
+		// For now we just treat it as connecting
+		t.State.SetConnecting(ctx, "backend_state_no_state_or_stopped")
+	case ipn.Starting.String():
+		t.State.SetConnecting(ctx, "backend_state_starting")
+	case ipn.NeedsLogin.String():
+		t.State.SetNeedsLogin(ctx, "backend_state_needs_login", status.AuthURL)
+	case ipn.NeedsMachineAuth.String():
+		t.State.SetNeedsMachineAuth(ctx, "backend_state_needs_machine_auth", status.CurrentTailnet.MagicDNSSuffix)
+	case ipn.Running.String():
+		t.State.SetConnected(ctx, "backend_state_running", status.CurrentTailnet.MagicDNSSuffix)
+	default:
+		panic("unknown backend state: " + status.BackendState)
+	}
+
+	logger.Printf("Tailnet state refreshed successfully: %s", t.State.Description())
 
 	return status, nil
 }

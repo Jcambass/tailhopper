@@ -2,10 +2,13 @@
 package web
 
 import (
-	"log"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"time"
 
+	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/ui"
@@ -17,10 +20,12 @@ type Server struct {
 	addr      string
 	tailnet   *ts.Tailnet
 	socksAddr string
+	logger    *logging.Logger
 }
 
 // NewServer creates and configures a new HTTP server.
 func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
+	logger := logging.Default().With("component", "httpserver")
 	mux := http.NewServeMux()
 
 	// Static files
@@ -43,6 +48,7 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 
 	// Tailnet toggle
 	mux.Handle("/tailnet/toggle", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestLogger := logging.FromContext(r.Context())
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -53,31 +59,114 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 		}
 		enabled := r.FormValue("enabled") != ""
 		if enabled {
-			err := tailnet.Start()
+			err := tailnet.Start(r.Context())
 			if err != nil {
-				log.Printf("failed to start tailnet: %v", err)
+				requestLogger.Printf("failed to start tailnet: %v", err)
 			}
 		} else {
-			if err := tailnet.Stop(); err != nil {
-				log.Printf("failed to disconnect: %v", err)
-			}
+			go func() {
+				ctx := logging.WithContext(context.Background(), requestLogger)
+				if err := tailnet.Stop(ctx); err != nil {
+					requestLogger.Printf("failed to disconnect: %v", err)
+				}
+			}()
+			w.WriteHeader(http.StatusAccepted)
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
+	rootHandler := withRequestContext(withRecovery(withRequestLogging(mux)))
+
 	return &Server{
 		server: &http.Server{
 			Addr:              addr,
-			Handler:           mux,
+			Handler:           rootHandler,
 			ReadHeaderTimeout: 10 * time.Second,
 		},
-		addr: addr,
+		addr:   addr,
+		logger: logger,
 	}
 }
 
 // Start begins serving HTTP requests (blocking).
 func (s *Server) Start() error {
-	log.Printf("PAC file available at http://%s%s", s.addr, pac.URLPath)
-	log.Printf("Dashboard available at http://%s", s.addr)
+	s.logger.Printf("PAC file available at http://%s%s", s.addr, pac.URLPath)
+	s.logger.Printf("Dashboard available at http://%s", s.addr)
 	return s.server.ListenAndServe()
+}
+
+type requestIDKey struct{}
+
+func withRequestContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-Id")
+		if requestID == "" {
+			requestID = newRequestID()
+		}
+		w.Header().Set("X-Request-Id", requestID)
+
+		logger := logging.Default().WithFields(map[string]string{
+			"component":  "httprequests",
+			"request_id": requestID,
+		})
+		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		ctx = logging.WithContext(ctx, logger)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func withRequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		writer := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(writer, r)
+
+		logger := logging.FromContext(r.Context())
+		logger.Printf("method=%s path=%s status=%d bytes=%d duration=%s remote=%s ua=%q",
+			r.Method,
+			r.URL.Path,
+			writer.status,
+			writer.bytes,
+			time.Since(start),
+			r.RemoteAddr,
+			r.UserAgent(),
+		)
+	})
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *loggingResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *loggingResponseWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	count, err := w.ResponseWriter.Write(data)
+	w.bytes += count
+	return count, err
+}
+
+func newRequestID() string {
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(buffer)
+}
+
+func withRecovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := logging.FromContext(r.Context())
+		defer logging.CatchPanic(logger)
+		next.ServeHTTP(w, r)
+	})
 }

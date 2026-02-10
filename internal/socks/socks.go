@@ -3,9 +3,9 @@ package socks
 
 import (
 	"context"
-	"log"
 	"net"
 
+	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/net/socks5"
 )
 
@@ -17,6 +17,7 @@ type Server struct {
 	server   *socks5.Server
 	listener net.Listener
 	addr     string
+	logger   *logging.Logger
 }
 
 // NewServer creates a new SOCKS5 server.
@@ -25,6 +26,7 @@ func NewServer(addr string, dial Dialer) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	logger := logging.Default().With("component", "socksserver")
 
 	return &Server{
 		server: &socks5.Server{
@@ -32,6 +34,7 @@ func NewServer(addr string, dial Dialer) (*Server, error) {
 		},
 		listener: listener,
 		addr:     addr,
+		logger:   logger,
 	}, nil
 }
 
@@ -43,11 +46,12 @@ func (s *Server) Addr() string {
 // Start begins serving SOCKS5 connections in the background.
 func (s *Server) Start() {
 	go func() {
+		defer logging.CatchPanic(s.logger)
 		if err := s.server.Serve(s.listener); err != nil {
-			log.Printf("SOCKS5 server error: %v", err)
+			s.logger.Printf("SOCKS5 server error: %v", err)
 		}
 	}()
-	log.Printf("SOCKS5 proxy listening on %s", s.addr)
+	s.logger.Printf("SOCKS5 proxy listening on %s", s.addr)
 }
 
 // Close stops the SOCKS5 server.
