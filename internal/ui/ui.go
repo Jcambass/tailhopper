@@ -68,8 +68,8 @@ type dashboardData struct {
 	SocksPort  string
 	PACFileURL string
 	Machines   []machineView
-	State      string // StateRunning, StateError, etc.
-	StateClass string // "running", "error", "needs-login", "connecting"
+	State      string // StateConnected, StateError, etc.
+	StateClass string // "connected", "error", "needs-login", "connecting"
 	AuthURL    string
 	ErrorMsg   string
 }

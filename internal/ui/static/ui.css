@@ -40,6 +40,13 @@
   font-weight: 400;
 }
 
+.tailnet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .tailnet-card .machines-title {
   margin-left: 4px;
 }
@@ -149,7 +156,7 @@ h1 {
   cursor: help;
 }
 
-.state-dot-inline.state-running {
+.state-dot-inline.state-connected {
   background: #4caf50;
 }
 
@@ -171,6 +178,60 @@ h1 {
 
 .state-dot-inline.state-error {
   background: #f44336;
+}
+
+.state-dot-inline.state-disabled {
+  background: #9e9e9e;
+}
+
+.tailnet-toggle {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.tailnet-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  width: 38px;
+  height: 20px;
+  background: #d6d6d6;
+  border-radius: 999px;
+  position: relative;
+  transition: background 0.2s ease;
+  box-shadow: inset 0 0 0 1px #cfcfcf;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease;
+}
+
+.tailnet-toggle input:checked + .toggle-slider {
+  background: #4caf50;
+  box-shadow: inset 0 0 0 1px #3e9b44;
+}
+
+.tailnet-toggle input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.tailnet-toggle input:focus-visible + .toggle-slider {
+  outline: 2px solid #90caf9;
+  outline-offset: 2px;
 }
 
 /* Setup Section */

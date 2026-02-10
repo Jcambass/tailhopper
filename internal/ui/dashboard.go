@@ -12,32 +12,86 @@ import (
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server, socksAddr string) {
-	baseDomain := tsServer.BaseDomain()
-	state := tsServer.State().Current()
+func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet, socksAddr string) {
+	state := tailnet.State.Current()
 
 	// Parse host and port from socksAddr
 	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 
 	// Base data structure
 	data := dashboardData{
-		BaseDomain: baseDomain,
+		BaseDomain: tailnet.State.MagicDNSSuffix(),
 		SocksAddr:  socksAddr,
 		SocksHost:  socksHost,
 		SocksPort:  socksPort,
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
-		State:      state.State.String(),
+		State:      state.String(),
 	}
 
-	// Handle non-running states - show dashboard with state card
-	switch state.State {
-	case ts.StateError:
-		log.Printf("dashboard: tsnet error: %v", state.Error)
-		data.StateClass = "error"
-		if state.Error != nil {
-			data.ErrorMsg = state.Error.Error()
+	// Try to get status, might change the state
+	status, err := tailnet.Status(r.Context())
+	if err != nil {
+		log.Printf("dashboard: failed to get status: %v", err)
+		// Status is updated internally by the tailnet state machine, so we can just continue and render the appropriate state card
+	}
+
+	// Handle non-connected states - show dashboard with state card
+	switch state {
+	case ts.StateConnected:
+		for _, peer := range status.Peer {
+			if len(peer.TailscaleIPs) == 0 {
+				continue
+			}
+
+			machineName := deriveMachineName(peer.DNSName, peer.HostName, tailnet.State.MagicDNSSuffix())
+
+			statusClass := "offline"
+			statusText := "offline"
+			if peer.Online {
+				statusClass = "online"
+				statusText = "online"
+			}
+
+			mv := machineView{
+				Name:        machineName,
+				DNSName:     peer.DNSName,
+				StatusClass: statusClass,
+				StatusText:  statusText,
+				IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
+			}
+
+			data.Machines = append(data.Machines, mv)
 		}
+
+		sort.Slice(data.Machines, func(i, j int) bool {
+			// Online machines first, then alphabetically by DNS name
+			if data.Machines[i].StatusClass != data.Machines[j].StatusClass {
+				return data.Machines[i].StatusClass == "online"
+			}
+			return strings.ToLower(data.Machines[i].DNSName) < strings.ToLower(data.Machines[j].DNSName)
+		})
+
+		data.StateClass = "connected"
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+	case ts.StateFailed:
+		err := tailnet.State.Error()
+		log.Printf("dashboard: tsnet error: %v", err)
+		data.StateClass = "error"
+		if err != nil {
+			data.ErrorMsg = err.Error()
+		}
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			log.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	case ts.StateDisabled:
+		data.StateClass = "disabled"
 		if err := renderTemplate(w, "dashboard.html", data); err != nil {
 			log.Printf("dashboard: failed to render template: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -45,7 +99,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 		return
 	case ts.StateNeedsLogin:
 		data.StateClass = "needs-login"
-		data.AuthURL = state.AuthURL
+		data.AuthURL = tailnet.State.AuthURL()
 		if err := renderTemplate(w, "dashboard.html", data); err != nil {
 			log.Printf("dashboard: failed to render template: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -71,76 +125,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tsServer *ts.Server,
 			log.Printf("dashboard: failed to render template: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
-		return
-	}
-
-	// StateRunning - fetch machines
-	data.StateClass = "running"
-
-	lc, err := tsServer.LocalClient()
-	if err != nil {
-		log.Printf("dashboard: failed to get local client: %v", err)
-		data.StateClass = "connecting"
-		if err := renderTemplate(w, "dashboard.html", data); err != nil {
-			log.Printf("dashboard: failed to render template: %v", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	ctx := r.Context()
-	status, err := lc.Status(ctx)
-	if err != nil {
-		log.Printf("dashboard: failed to get status: %v", err)
-		data.StateClass = "connecting"
-		if err := renderTemplate(w, "dashboard.html", data); err != nil {
-			log.Printf("dashboard: failed to render template: %v", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Get our hostname from status
-	if status.Self != nil {
-		data.Hostname = status.Self.HostName
-	}
-
-	for _, peer := range status.Peer {
-		if len(peer.TailscaleIPs) == 0 {
-			continue
-		}
-
-		machineName := deriveMachineName(peer.DNSName, peer.HostName, baseDomain)
-
-		statusClass := "offline"
-		statusText := "offline"
-		if peer.Online {
-			statusClass = "online"
-			statusText = "online"
-		}
-
-		mv := machineView{
-			Name:        machineName,
-			DNSName:     peer.DNSName,
-			StatusClass: statusClass,
-			StatusText:  statusText,
-			IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
-		}
-
-		data.Machines = append(data.Machines, mv)
-	}
-
-	sort.Slice(data.Machines, func(i, j int) bool {
-		// Online machines first, then alphabetically by DNS name
-		if data.Machines[i].StatusClass != data.Machines[j].StatusClass {
-			return data.Machines[i].StatusClass == "online"
-		}
-		return strings.ToLower(data.Machines[i].DNSName) < strings.ToLower(data.Machines[j].DNSName)
-	})
-
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		log.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 }
