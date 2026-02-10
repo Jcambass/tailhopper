@@ -29,7 +29,13 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet,
 		State:      tailnet.State.Description(),
 	}
 
-	// Handle disabled state early since it's a state handled fully by us.
+	// Handle disabling and disabled state early since it's a state handled fully by us.
+
+	if tailnet.State.Disabling() {
+		disabling(w, logger, &data)
+		return
+	}
+
 	if tailnet.State.Disabled() {
 		disabled(w, logger, &data)
 		return
@@ -125,6 +131,14 @@ func failed(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, 
 	logger.Printf("dashboard: tsnet error: %v", err)
 	data.StateClass = "error"
 	data.ErrorMsg = err.Error()
+	if err := renderTemplate(w, "dashboard.html", data); err != nil {
+		logger.Printf("dashboard: failed to render template: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
+}
+
+func disabling(w http.ResponseWriter, logger *logging.Logger, data *dashboardData) {
+	data.StateClass = "disabling"
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
 		logger.Printf("dashboard: failed to render template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

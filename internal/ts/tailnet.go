@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/ipn"
@@ -18,8 +19,9 @@ type Tailnet struct {
 	State  *stateMachine
 	logger *logging.Logger
 
-	server  *tsnet.Server
-	watcher *watcher
+	server      *tsnet.Server
+	watcher     *watcher
+	lifecycleMu *sync.RWMutex
 }
 
 func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *Tailnet {
@@ -31,16 +33,29 @@ func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *
 		Hostname:      hostname,
 		State:         newStateMachine(),
 		logger:        logger,
+		lifecycleMu:   &sync.RWMutex{},
 	}
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
+	if !t.lifecycleMu.TryLock() {
+		return errors.New("tailnet is in the process of starting or stopping")
+	}
+	defer t.lifecycleMu.Unlock()
+
 	if !t.State.Disabled() {
 		return errors.New("tailnet that is not disabled cannot be started")
 	}
 
+	if t.State.Disabling() {
+		return errors.New("tailnet that is currently disabling cannot be started")
+	}
+
 	logger := logging.FromContext(ctx).With("component", "tailnet")
 	logger.Printf("Starting tailnet")
+
+	// Explicitly set the status to connecting BEFORE we do more work.
+	t.State.SetConnecting(ctx, "tailnet_start")
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
@@ -59,13 +74,19 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Explicitly set the status to connecting
-	t.State.SetConnecting(ctx, "tailnet_start")
-
 	return nil
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
+	if !t.lifecycleMu.TryLock() {
+		return errors.New("tailnet is in the process of starting or stopping")
+	}
+	defer t.lifecycleMu.Unlock()
+
+	if t.State.Disabling() {
+		return errors.New("tailnet that is currently disabling cannot be stopped")
+	}
+
 	if t.State.Disabled() {
 		return errors.New("tailnet that is disabled cannot be stopped")
 	}
@@ -73,9 +94,11 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	logger := logging.FromContext(ctx).With("component", "tailnet")
 	logger.Printf("Stopping tailnet")
 
-	// Explicitly set state to disabled on stop before stopping the server and watcher to ensure
-	// that any in-flight operations are aware of the disabled state and don't try to interact with the server or dial new connections.
-	t.State.SetDisabled(ctx)
+	// Mark as disabling so the UI can render a disconnecting state while shutdown is in flight.
+	// We can't directly set to disabled here since we need to wait for the server and watcher to fully stop.
+	// If we were to set to disabled immediately, we would allow connecting again before the server is fully stopped which would cause issues.
+	// The lifecycleMu does the heavy lifting but the state is important for the UI.
+	t.State.SetDisabling(ctx)
 
 	if t.watcher != nil {
 		logger.Printf("Stopping IPN watcher")
@@ -92,14 +115,26 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		logger.Printf("tsnet server stopped")
 	}
 
+	// Set disabled after the server and watcher are fully stopped.
+	t.State.SetDisabled(ctx)
+
 	logger.Printf("Tailnet stopped successfully")
 
 	return nil
 }
 
 func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
+	if !t.lifecycleMu.TryRLock() {
+		return nil, errors.New("tailnet is in the process of starting or stopping")
+	}
+	defer t.lifecycleMu.RUnlock()
+
 	logger := logging.FromContext(ctx).With("component", "tailnet")
 	logger.Printf("Refreshing tailnet state")
+
+	if t.State.Disabling() {
+		return nil, errors.New("tailnet that is currently disabling cannot refresh state")
+	}
 
 	if t.State.Disabled() {
 		return nil, errors.New("tailnet that is disabled cannot refresh state")
@@ -166,6 +201,15 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 }
 
 func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
+	if !t.lifecycleMu.TryRLock() {
+		return nil, errors.New("tailnet is in the process of starting or stopping")
+	}
+	defer t.lifecycleMu.RUnlock()
+
+	if t.State.Disabling() {
+		return nil, errors.New("tailnet that is currently disabling cannot dial")
+	}
+
 	if t.State.Disabled() {
 		return nil, errors.New("tailnet that is disabled cannot dial")
 	}

@@ -18,7 +18,8 @@
     hx-post="/tailnet/toggle"
     hx-trigger="change"
     hx-swap="none"
-    {{if ne .StateClass "disabled"}}checked{{end}}
+    {{if and (ne .StateClass "disabled") (ne .StateClass "disabling")}}checked{{end}}
+    {{if eq .StateClass "disabling"}}disabled{{end}}
   >
   <span class="toggle-slider"></span>
 {{end}}

@@ -14,6 +14,8 @@ type state int
 const (
 	// StateDisabled indicates tsnet is manually disconnected
 	StateDisabled state = iota
+	// StateDisabling indicates tsnet is in the process of manually being disconnected.
+	StateDisabling
 	// StateConnecting is the initial state while tsnet is starting up.
 	StateConnecting
 	// StateConnectingSlow indicates connection is taking longer than expected.
@@ -32,6 +34,8 @@ func (s state) String() string {
 	switch s {
 	case StateDisabled:
 		return "Disabled"
+	case StateDisabling:
+		return "Disabling"
 	case StateConnecting:
 		return "Connecting"
 	case StateConnectingSlow:
@@ -71,6 +75,12 @@ func (sm *stateMachine) Description() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.state.String()
+}
+
+func (sm *stateMachine) Disabling() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.state == StateDisabling
 }
 
 func (sm *stateMachine) Disabled() bool {
@@ -127,6 +137,27 @@ func (sm *stateMachine) Failed() (bool, error) {
 }
 
 // State transitions
+func (sm *stateMachine) SetDisabling(ctx context.Context) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.state == StateDisabling {
+		return // No transition needed
+	}
+
+	if sm.state == StateDisabled {
+		panic("invalid state transition to Disabling from state " + sm.state.String())
+	}
+
+	sm.state = StateDisabling
+	sm.authURL = ""
+	sm.err = nil
+	if sm.slowTimer != nil {
+		sm.slowTimer.Stop()
+		sm.slowTimer = nil
+	}
+}
+
 func (sm *stateMachine) SetDisabled(ctx context.Context) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
