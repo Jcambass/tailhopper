@@ -474,6 +474,10 @@ h1 {
   height: 120px;
 }
 
+.hopper-small.bouncer {
+  animation: none;
+}
+
 .state-message {
   font-size: 1em;
   color: #555;
