@@ -5,19 +5,19 @@ import (
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/logging"
+	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 )
 
 type watcher struct {
 	tailnet *Tailnet
-	done    chan struct{}
+	watcher *local.IPNBusWatcher
 	wg      *sync.WaitGroup
 }
 
 func newWatcher(tailnet *Tailnet) *watcher {
 	return &watcher{
 		tailnet: tailnet,
-		done:    make(chan struct{}),
 		wg:      &sync.WaitGroup{},
 	}
 }
@@ -50,20 +50,16 @@ func (w *watcher) Start() {
 			logger.Printf("failed to watch IPN bus: %v", err)
 			return
 		}
+		w.watcher = watcher
 		defer watcher.Close()
 
 		for {
-			select {
-			case <-w.done:
-				logger.Printf("IPN watcher stopped")
-				return
-			default:
-			}
-
 			n, err := watcher.Next()
 			if err != nil {
 				logger.Printf("IPN watcher error: %v", err)
-				w.tailnet.State.SetFailed(ctx, "ipn_watcher_error", err)
+				// We can't use w.tailnet.State.SetFailed here because the watcher is expected to be closed due to tailnet shutdown.
+				// Ideally we could distinguish between expected closure and unexpected errors.
+
 				return
 			}
 			if n.State != nil {
@@ -74,16 +70,22 @@ func (w *watcher) Start() {
 					logger.Printf("watcher failed to refresh state: %v", err)
 				}
 			}
-			// Also check for auth URL in BrowseToURL notifications
-			// if n.BrowseToURL != nil && *n.BrowseToURL != "" {
-			// 	logger.Printf("Auth URL from notification: %s", *n.BrowseToURL)
-			// 	w.tailnet.State.SetNeedsLogin(ctx, *n.BrowseToURL)
-			// }
 		}
 	})
 }
 
 func (w *watcher) Stop() {
-	close(w.done)
-	w.wg.Wait()
+	logger := w.tailnet.logger.WithFields(map[string]string{
+		"component": "watcher",
+		"job":       "ipn",
+	})
+
+	if w.watcher != nil {
+		logger.Printf("Closing IPN watcher")
+		w.watcher.Close()
+		w.watcher = nil
+		logger.Printf("IPN watcher closed, waiting for goroutine to exit")
+		w.wg.Wait()
+		logger.Printf("IPN watcher stopped successfully")
+	}
 }

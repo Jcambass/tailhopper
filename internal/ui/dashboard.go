@@ -26,11 +26,11 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet,
 		SocksPort:  socksPort,
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
+		BaseDomain: tailnet.State.BestEffortMagicDNSSuffix(),
 		State:      tailnet.State.Description(),
 	}
 
 	// Handle disabling and disabled state early since it's a state handled fully by us.
-
 	if tailnet.State.Disabling() {
 		disabling(w, logger, &data)
 		return

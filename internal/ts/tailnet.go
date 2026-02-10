@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/ipn"
@@ -100,10 +101,13 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	// The lifecycleMu does the heavy lifting but the state is important for the UI.
 	t.State.SetDisabling(ctx)
 
+	// I'm a horrible person but I want to see our disabling state so we sleep for a moment here :sorry-not-sorry:
+	time.Sleep(1 * time.Second)
+
 	if t.watcher != nil {
-		logger.Printf("Stopping IPN watcher")
+		logger.Printf("Stopping watcher")
 		t.watcher.Stop()
-		logger.Printf("IPN watcher stopped")
+		logger.Printf("Watcher stopped")
 	}
 	if t.server != nil {
 		logger.Printf("Stopping tsnet server")

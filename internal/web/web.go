@@ -76,7 +76,8 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	rootHandler := withRequestContext(withRecovery(withRequestLogging(mux)))
+	// do not use request logging for now
+	rootHandler := withRequestContext(withRecovery(mux))
 
 	return &Server{
 		server: &http.Server{

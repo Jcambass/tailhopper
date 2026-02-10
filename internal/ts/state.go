@@ -71,6 +71,14 @@ func newStateMachine() *stateMachine {
 	return sm
 }
 
+// BestEffortMagicDNSSuffix returns the magicDNS suffix if available, otherwise returns an empty string.
+// If you need to be sure that the magicDNS suffix is available, use the return values from Connected() or NeedsMachineAuth() instead.
+func (sm *stateMachine) BestEffortMagicDNSSuffix() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.magicDNSSuffix
+}
+
 func (sm *stateMachine) Description() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
