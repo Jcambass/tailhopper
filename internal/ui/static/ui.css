@@ -69,6 +69,10 @@
   display: none;
 }
 
+html {
+  overflow-y: scroll;
+}
+
 body {
   font-family: system-ui, sans-serif;
   max-width: 800px;
