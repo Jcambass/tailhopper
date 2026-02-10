@@ -57,7 +57,7 @@ type stateMachine struct {
 	state          state
 	authURL        string // Set when State == StateNeedsLogin
 	err            error  // Set when State == StateFailed
-	magicDNSSuffix string // Set when State == StateConnected || StateMachineAuthNeeded
+	magicDNSSuffix string // Set when State == StateConnected || StateNeedsMachineAuth
 	slowTimer      *time.Timer
 	mu             *sync.RWMutex
 }
