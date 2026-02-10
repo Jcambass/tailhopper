@@ -19,6 +19,11 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet,
 	// Parse host and port from socksAddr
 	socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 
+	bestEffortSuffix := tailnet.State.BestEffortMagicDNSSuffix()
+	if bestEffortSuffix == "" {
+		bestEffortSuffix = "Tailnet"
+	}
+
 	// Base data structure
 	data := dashboardData{
 		SocksAddr:  socksAddr,
@@ -26,7 +31,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet,
 		SocksPort:  socksPort,
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
-		BaseDomain: tailnet.State.BestEffortMagicDNSSuffix(),
+		BaseDomain: bestEffortSuffix,
 		State:      tailnet.State.Description(),
 	}
 
