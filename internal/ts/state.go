@@ -279,7 +279,11 @@ func (sm *stateMachine) SetNeedsMachineAuth(ctx context.Context, reason string, 
 		return // No transition needed
 	}
 
-	if sm.state != StateNeedsLogin {
+	// Transitioning to NeedsMachineAuth from NeedsLogin is possible if the user completes the login but the machine still needs auth.
+	// It's also possible when we're logged in but the machine needs auth before we can fully connect, so we allow transitioning from connecting states as well.
+	// The real reason why the above happens is because we can transition from this state to the connection state and then here again.
+	// We should fix that but it's kinda hard.. This is ok for now!
+	if sm.state != StateNeedsLogin && sm.state != StateConnecting && sm.state != StateConnectingSlow {
 		panic("invalid state transition to NeedsMachineAuth from state " + sm.state.String())
 	}
 

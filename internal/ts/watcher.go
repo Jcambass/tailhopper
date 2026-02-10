@@ -28,9 +28,8 @@ func (w *watcher) Start() {
 		"job":       "ipn",
 	})
 	logger.Printf("Starting IPN watcher")
-	go func() {
+	w.wg.Go(func() {
 		defer logging.CatchPanic(logger)
-		defer w.wg.Done()
 		defer logger.Printf("IPN watcher goroutine exiting")
 
 		ctx := logging.WithContext(context.Background(), logger)
@@ -81,7 +80,7 @@ func (w *watcher) Start() {
 			// 	w.tailnet.State.SetNeedsLogin(ctx, *n.BrowseToURL)
 			// }
 		}
-	}()
+	})
 }
 
 func (w *watcher) Stop() {
