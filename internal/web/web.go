@@ -33,7 +33,7 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 	mux.Handle("/ui/", http.RedirectHandler("/", http.StatusTemporaryRedirect))
 
 	// PAC file
-	mux.Handle(pac.URLPath, pac.Handler(tailnet, socksAddr))
+	mux.Handle(pac.URLPath, withRequestLogging(pac.Handler(tailnet, socksAddr)))
 
 	// Dashboard
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +45,7 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 	}))
 
 	// Tailnet toggle
-	mux.Handle("/tailnet/toggle", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/tailnet/toggle", withRequestLogging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestLogger := logging.FromContext(r.Context())
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -72,7 +72,7 @@ func NewServer(addr string, tailnet *ts.Tailnet, socksAddr string) *Server {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	})))
 
 	rootHandler := withRequestContext(withRecovery(mux))
 
@@ -127,5 +127,40 @@ func withRecovery(next http.Handler) http.Handler {
 		logger := logging.FromContext(r.Context())
 		defer logging.CatchPanic(logger)
 		next.ServeHTTP(w, r)
+	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	written    bool
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	if !rw.written {
+		rw.statusCode = code
+		rw.written = true
+		rw.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	if !rw.written {
+		rw.statusCode = http.StatusOK
+		rw.written = true
+	}
+	return rw.ResponseWriter.Write(b)
+}
+
+func withRequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := logging.FromContext(r.Context())
+		logger.Printf("Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+
+		logger.Printf("Response: %s %s -> %d", r.Method, r.URL.Path, rw.statusCode)
 	})
 }
