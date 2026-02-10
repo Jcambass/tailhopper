@@ -16,21 +16,6 @@ import (
 func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet) {
 	logger := logging.FromContext(r.Context()).With("component", "dashboard")
 
-	// TODO: Move this to the tailnet section and do not show for disabled
-	// or do if we have it from the file anyway. Let's see.
-	var socksAddr string
-	var socksHost string
-	var socksPort string
-	if tailnet.State.Disabled() || tailnet.State.Disabling() {
-		socksAddr = "N/A"
-		socksHost = "N/A"
-		socksPort = "N/A"
-	} else {
-		// Parse host and port from socksAddr
-		socksAddr = tailnet.SocksAddr()
-		socksHost, socksPort, _ = net.SplitHostPort(socksAddr)
-	}
-
 	bestEffortSuffix := tailnet.State.BestEffortMagicDNSSuffix()
 	if bestEffortSuffix == "" {
 		bestEffortSuffix = "Tailnet"
@@ -38,9 +23,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet)
 
 	// Base data structure
 	data := dashboardData{
-		SocksAddr:  socksAddr,
-		SocksHost:  socksHost,
-		SocksPort:  socksPort,
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
 		BaseDomain: bestEffortSuffix,
@@ -59,22 +41,19 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet)
 	}
 
 	// For all other states, attempt to refresh the state machine and get the latest status from the tailnet.
-	// TODO: We used to enter the failed state if we failed to refresh the state, but that was a bit too aggressive and made it hard to recover from transient errors.
-	// But now we might mask problems?
 	status, err := tailnet.RefreshState(r.Context())
 	if err != nil {
-		// Will have set the state to failed, so just log the error here and continue to render the dashboard which will show the error state.
 		logger.Printf("dashboard: failed to refresh tailnet state: %v", err)
 	}
 
 	// Connected state - show machines and their status
 	if ok, suffix := tailnet.State.Connected(); ok {
+		socksAddr := tailnet.SocksAddr()
+		socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+		data.SocksAddr = socksAddr
+		data.SocksHost = socksHost
+		data.SocksPort = socksPort
 		connected(w, logger, &data, status, suffix)
-		return
-	}
-
-	if ok, err := tailnet.State.Failed(); ok {
-		failed(w, logger, &data, err)
 		return
 	}
 
@@ -143,16 +122,6 @@ func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardDat
 		logger.Printf("dashboard: failed to render template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
-	}
-}
-
-func failed(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, err error) {
-	logger.Printf("dashboard: tsnet error: %v", err)
-	data.StateClass = "error"
-	data.ErrorMsg = err.Error()
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }
 

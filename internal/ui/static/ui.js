@@ -5,7 +5,8 @@ function copyToClipboard(elementId) {
   var text = el.textContent || el.innerText;
   navigator.clipboard.writeText(text).then(function() {
     // Show brief feedback by swapping icons
-    var btn = el.closest('.code-block').querySelector('.copy-btn');
+    var container = el.closest('.code-block') || el.closest('.tailnet-socks-value');
+    var btn = container ? container.querySelector('.copy-btn') : null;
     if (btn) {
       btn.classList.add('copied');
       setTimeout(function() {

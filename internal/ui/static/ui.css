@@ -184,10 +184,6 @@ h1 {
   background: #2196F3;
 }
 
-.state-dot-inline.state-error {
-  background: #f44336;
-}
-
 .state-dot-inline.state-disabling {
   background: #ff9800;
 }
@@ -273,6 +269,105 @@ h1 {
   border-radius: 8px;
   padding: 20px;
   margin-bottom: 24px;
+}
+
+.tailnet-socks {
+  margin: 6px 4px 12px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+
+.tailnet-socks-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.tailnet-socks-item {
+  background: transparent;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tailnet-socks-label {
+  font-size: 0.75em;
+  color: #666666;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.tailnet-socks-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 4px; /* Padding for the container */
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05); /* Slight shadow for depth */
+}
+
+/* Remove border/bg from the code element since the container handles it */
+.tailnet-socks-value code {
+  flex: 1;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.9em; /* Slightly larger text */
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 0;
+  word-break: break-all;
+  color: #333;
+}
+
+/* Integrate the button better: square-ish, maybe slightly rounded */
+.tailnet-socks-value .copy-btn {
+  padding: 6px;
+  border-radius: 4px;
+  background: #0066cc; /* Keep brand color or go subtle */
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.tailnet-socks-note {
+  margin: 8px 2px 0;
+  font-size: 0.85em;
+  color: #777777;
+}
+
+.tailnet-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 2px 8px;
+}
+
+.tailnet-section-title {
+  font-weight: 600;
+  color: #2f2f2f;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+  font-size: 0.82em;
+}
+
+.tailnet-section-badge {
+  font-size: 0.78em;
+  color: #2f2f2f;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  background: #e8f5e9;
+  border: 1px solid #c8e6c9;
+  padding: 3px 9px;
+  border-radius: 999px;
 }
 
 .setup-section h2 {
@@ -501,16 +596,6 @@ h1 {
   color: #1565c0;
 }
 
-.state-error-details {
-  background: #ffebee;
-  border: 1px solid #ffcdd2;
-  border-radius: 4px;
-  padding: 10px;
-  margin: 15px 0;
-  color: #c62828;
-  font-size: 0.9em;
-  word-break: break-word;
-}
 
 .state-actions {
   margin: 20px 0 0 0;

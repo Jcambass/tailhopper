@@ -57,7 +57,7 @@ func (w *watcher) Start() {
 			n, err := watcher.Next()
 			if err != nil {
 				logger.Printf("IPN watcher error: %v", err)
-				// We can't use w.tailnet.State.SetFailed here because the watcher is expected to be closed due to tailnet shutdown.
+				// The watcher can close due to tailnet shutdown; ignore and exit.
 				// Ideally we could distinguish between expected closure and unexpected errors.
 
 				return
