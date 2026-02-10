@@ -67,7 +67,7 @@ func newStateMachine() *stateMachine {
 	sm := &stateMachine{
 		mu: &sync.RWMutex{},
 	}
-	sm.SetDisabled(context.Background())
+	sm.SetDisabled(context.Background(), "initialization")
 	return sm
 }
 
@@ -145,9 +145,12 @@ func (sm *stateMachine) Failed() (bool, error) {
 }
 
 // State transitions
-func (sm *stateMachine) SetDisabling(ctx context.Context) {
+func (sm *stateMachine) SetDisabling(ctx context.Context, reason string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> Disabling (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateDisabling {
 		return // No transition needed
@@ -166,9 +169,12 @@ func (sm *stateMachine) SetDisabling(ctx context.Context) {
 	}
 }
 
-func (sm *stateMachine) SetDisabled(ctx context.Context) {
+func (sm *stateMachine) SetDisabled(ctx context.Context, reason string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	logger := logging.FromContext(ctx).With("component", "state")
+	logger.Printf("State transition: %s -> Disabled (reason: %s)", sm.state.String(), reason)
 
 	if sm.state == StateDisabled {
 		return // No transition needed

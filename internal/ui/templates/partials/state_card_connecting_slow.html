@@ -2,37 +2,7 @@
   <!-- Slow Connecting State Card -->
   <div class="state-body">
     <div class="hopper-small-container" hx-preserve>
-      <svg id="hopper-connecting-slow" class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="bodyGradOrange" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" style="stop-color:#FFA726;stop-opacity:1" />
-              <stop offset="100%" style="stop-color:#FB8C00;stop-opacity:1" />
-            </linearGradient>
-          </defs>
-          <path d="M 50 85 Q 55 100 50 115" stroke="#FFB74D" stroke-width="4" fill="none" stroke-linecap="round" />
-          <ellipse cx="50" cy="55" rx="22" ry="28" fill="url(#bodyGradOrange)" />
-          <circle cx="50" cy="25" r="18" fill="#FFB74D" />
-          <circle cx="40" cy="20" r="5" fill="#fff" />
-          <circle cx="40" cy="20" r="3" fill="#E65100" />
-          <circle cx="41" cy="19" r="1" fill="#fff" />
-          <circle cx="60" cy="20" r="5" fill="#fff" />
-          <circle cx="60" cy="20" r="3" fill="#E65100" />
-          <circle cx="61" cy="19" r="1" fill="#fff" />
-          <path d="M 45 30 Q 50 28 55 30" stroke="#E65100" stroke-width="1.5" fill="none" stroke-linecap="round" />
-          <path d="M 38 10 Q 28 5 25 2" stroke="#E65100" stroke-width="2.5" fill="none" stroke-linecap="round" />
-          <circle cx="25" cy="2" r="2" fill="#E65100" />
-          <path d="M 62 10 Q 72 5 75 2" stroke="#E65100" stroke-width="2.5" fill="none" stroke-linecap="round" />
-          <circle cx="75" cy="2" r="2" fill="#E65100" />
-          <ellipse cx="50" cy="60" rx="14" ry="18" fill="#FFCC80" opacity="0.4" />
-          <g class="legs">
-            <ellipse cx="32" cy="70" rx="3" ry="14" fill="#E65100" transform="rotate(-25 32 70)" />
-            <ellipse cx="68" cy="70" rx="3" ry="14" fill="#E65100" transform="rotate(25 68 70)" />
-          </g>
-          <g class="back-legs">
-            <ellipse cx="28" cy="78" rx="3" ry="16" fill="#E65100" transform="rotate(-35 28 78)" />
-            <ellipse cx="72" cy="78" rx="3" ry="16" fill="#E65100" transform="rotate(35 72 78)" />
-          </g>
-      </svg>
+      {{template "_hopper_orange" .}}
     </div>
     <p class="state-message">Connecting...</p>
     <p class="state-note">This is taking longer than usual. Check your network connectivity.</p>

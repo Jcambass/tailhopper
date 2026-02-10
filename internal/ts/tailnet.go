@@ -99,7 +99,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	// We can't directly set to disabled here since we need to wait for the server and watcher to fully stop.
 	// If we were to set to disabled immediately, we would allow connecting again before the server is fully stopped which would cause issues.
 	// The lifecycleMu does the heavy lifting but the state is important for the UI.
-	t.State.SetDisabling(ctx)
+	t.State.SetDisabling(ctx, "tailnet_stop")
 
 	// I'm a horrible person but I want to see our disabling state so we sleep for a moment here :sorry-not-sorry:
 	time.Sleep(1 * time.Second)
@@ -120,7 +120,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	}
 
 	// Set disabled after the server and watcher are fully stopped.
-	t.State.SetDisabled(ctx)
+	t.State.SetDisabled(ctx, "tailnet_stopped")
 
 	logger.Printf("Tailnet stopped successfully")
 
