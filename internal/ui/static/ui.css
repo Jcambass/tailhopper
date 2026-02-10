@@ -165,11 +165,11 @@ h1 {
 }
 
 .state-dot-inline.state-connecting {
-  background: #f44336;
+  background: #ff9800;
 }
 
 .state-dot-inline.state-connecting-slow {
-  background: #f44336;
+  background: #ff9800;
 }
 
 .state-dot-inline.state-needs-login {
