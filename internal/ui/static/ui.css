@@ -456,11 +456,19 @@ h1 {
   animation: hop 1.2s ease-in-out infinite;
 }
 
+
+
 #hopper-disabled {
   transform: translateY(12px);
 }
 
 .hopper-small.sleeping {
+  animation: none;
+  width: 100px;
+  height: 120px;
+}
+
+.hopper-small.thinking {
   animation: none;
   width: 100px;
   height: 120px;

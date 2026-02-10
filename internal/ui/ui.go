@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-//go:embed templates/*.html templates/partials/*.html static/*
+//go:embed templates/*.html templates/partials/*.html templates/partials/*.svg static/*
 var uiFS embed.FS
 
 var (
@@ -21,7 +21,7 @@ var (
 
 func init() {
 	var err error
-	templates, err = template.New("").ParseFS(uiFS, "templates/*.html", "templates/partials/*.html")
+	templates, err = template.New("").ParseFS(uiFS, "templates/*.html", "templates/partials/*.html", "templates/partials/*.svg")
 	if err != nil {
 		panic(err)
 	}
