@@ -10,6 +10,7 @@ import (
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/types/key"
 )
 
 // ServeDashboard renders the main dashboard page.
@@ -40,8 +41,8 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet)
 		return
 	}
 
-	// For all other states, attempt to refresh the state machine and get the latest status from the tailnet.
-	status, err := tailnet.RefreshState(r.Context())
+	// For all other states, attempt to refresh the state machine and get the latest peer from the tailnet.
+	peer, err := tailnet.RefreshState(r.Context())
 	if err != nil {
 		logger.Printf("dashboard: failed to refresh tailnet state: %v", err)
 	}
@@ -53,7 +54,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet)
 		data.SocksAddr = socksAddr
 		data.SocksHost = socksHost
 		data.SocksPort = socksPort
-		connected(w, logger, &data, status, suffix)
+		connected(w, logger, &data, peer, suffix)
 		return
 	}
 
@@ -82,8 +83,8 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet)
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
-func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, status *ipnstate.Status, suffix string) {
-	for _, peer := range status.Peer {
+func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, peer map[key.NodePublic]*ipnstate.PeerStatus, suffix string) {
+	for _, peer := range peer {
 		if len(peer.TailscaleIPs) == 0 {
 			continue
 		}
