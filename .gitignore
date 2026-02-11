@@ -28,4 +28,5 @@ go.work
 
 # Project specific
 /tailhopper
+/main
 /tsnet-state/

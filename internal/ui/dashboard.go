@@ -9,101 +9,98 @@ import (
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
-	"tailscale.com/ipn/ipnstate"
-	"tailscale.com/types/key"
+	"tailscale.com/ipn"
+	"tailscale.com/tailcfg"
 )
 
 // ServeDashboard renders the main dashboard page.
 func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet) {
 	logger := logging.FromContext(r.Context()).With("component", "dashboard")
 
-	bestEffortSuffix := tailnet.State.BestEffortMagicDNSSuffix()
-	if bestEffortSuffix == "" {
-		bestEffortSuffix = "Tailnet"
+	state := tailnet.LatestState()
+
+	bestEffortDomain := "Tailnet"
+	if state.MagicDNSSuffix != "" {
+		bestEffortDomain = state.MagicDNSSuffix
 	}
 
 	// Base data structure
 	data := dashboardData{
 		PACFileURL: pac.URLPath,
 		Machines:   []machineView{},
-		BaseDomain: bestEffortSuffix,
-		State:      tailnet.State.Description(),
+		BaseDomain: bestEffortDomain,
 	}
 
-	// Handle disabling and disabled state early since it's a state handled fully by us.
-	if tailnet.State.Disabling() {
-		disabling(w, logger, &data)
-		return
-	}
-
-	if tailnet.State.Disabled() {
+	if state.State == nil {
 		disabled(w, logger, &data)
 		return
 	}
 
-	// For all other states, attempt to refresh the state machine and get the latest peer from the tailnet.
-	peer, err := tailnet.RefreshState(r.Context())
-	if err != nil {
-		logger.Printf("dashboard: failed to refresh tailnet state: %v", err)
-	}
-
-	// Connected state - show machines and their status
-	if ok, suffix := tailnet.State.Connected(); ok {
-		socksAddr := tailnet.SocksAddr()
-		socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
-		data.SocksAddr = socksAddr
-		data.SocksHost = socksHost
-		data.SocksPort = socksPort
-		connected(w, logger, &data, peer, suffix)
+	switch *state.State {
+	case ipn.NoState:
+		disabled(w, logger, &data)
 		return
-	}
-
-	if ok, authURL := tailnet.State.NeedsLogin(); ok {
-		needsLogin(w, logger, &data, authURL)
+	case ipn.InUseOtherUser:
+		// should never happen to us. Consider failure for now.
+		panic("unexpected state: InUseOtherUser")
+	case ipn.NeedsLogin:
+		// TODO: Guard against nil BrowseToURL.
+		needsLogin(w, logger, &data, *state.BrowseToURL)
 		return
-	}
-
-	if ok, suffix := tailnet.State.NeedsMachineAuth(); ok {
-		needsMachineAuth(w, logger, &data, suffix)
+	case ipn.NeedsMachineAuth:
+		needsMachineAuth(w, logger, &data, bestEffortDomain)
 		return
-	}
-
-	if tailnet.State.SlowConnecting() {
-		slowConnecting(w, logger, &data)
+	case ipn.Stopped:
+		disabled(w, logger, &data)
 		return
-	}
-
-	if tailnet.State.Connecting() {
+	case ipn.Starting:
 		connecting(w, logger, &data)
+		return
+	case ipn.Running:
+		socksAddr, ready := tailnet.SocksAddr()
+		if !ready {
+			logger.Printf("SOCKS5 proxy is not ready yet")
+			data.SocksAddr = "N/A"
+			data.SocksHost = "N/A"
+			data.SocksPort = "N/A"
+			// We can still render the dashboard without the SOCKS address, so we continue instead of returning an error.
+		} else {
+			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+			data.SocksAddr = socksAddr
+			data.SocksHost = socksHost
+			data.SocksPort = socksPort
+		}
+
+		connected(w, logger, &data, state.Peers, bestEffortDomain)
 		return
 	}
 
 	// Default case - should not happen, but just in case render 500
-	logger.Printf("dashboard: unknown state: %s", tailnet.State.Description())
+	logger.Printf("dashboard: unknown state: %s", state.String())
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
-func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, peer map[key.NodePublic]*ipnstate.PeerStatus, suffix string) {
+func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, peer []tailcfg.NodeView, suffix string) {
 	for _, peer := range peer {
-		if len(peer.TailscaleIPs) == 0 {
+		if peer.Addresses().Len() == 0 {
 			continue
 		}
 
-		machineName := deriveMachineName(peer.DNSName, peer.HostName, suffix)
+		machineName := peer.ComputedName()
 
 		statusClass := "offline"
 		statusText := "offline"
-		if peer.Online {
+		if peer.Online().Get() {
 			statusClass = "online"
 			statusText = "online"
 		}
 
 		mv := machineView{
 			Name:        machineName,
-			DNSName:     peer.DNSName,
+			DNSName:     peer.Name(),
 			StatusClass: statusClass,
 			StatusText:  statusText,
-			IPs:         strings.Join(formatIPs(peer.TailscaleIPs), ", "),
+			IPs:         strings.Join(formatIPs(peer.Addresses().AsSlice()), ", "),
 		}
 
 		data.Machines = append(data.Machines, mv)

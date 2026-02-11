@@ -27,7 +27,7 @@ func init() {
 	}
 }
 
-func formatIPs(ips []netip.Addr) []string {
+func formatIPs(ips []netip.Prefix) []string {
 	result := make([]string, len(ips))
 	for i, ip := range ips {
 		result[i] = ip.String()
@@ -45,19 +45,6 @@ func renderTemplate(w http.ResponseWriter, name string, data interface{}) error 
 	return err
 }
 
-// deriveMachineName extracts the short machine name from DNSName or falls back to HostName.
-func deriveMachineName(dnsName, hostName, baseDomain string) string {
-	name := dnsName
-	if name != "" {
-		name = strings.TrimSuffix(name, ".")
-		name = strings.TrimSuffix(name, "."+baseDomain)
-	}
-	if name == "" {
-		name = hostName
-	}
-	return name
-}
-
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
 	BaseDomain string
@@ -67,7 +54,6 @@ type dashboardData struct {
 	SocksPort  string
 	PACFileURL string
 	Machines   []machineView
-	State      string // StateConnected, StateConnecting, etc.
 	StateClass string // "connected", "needs-login", "connecting"
 	AuthURL    string
 }

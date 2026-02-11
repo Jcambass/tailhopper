@@ -5,30 +5,121 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
-	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/socks"
 	"tailscale.com/ipn"
-	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
-	"tailscale.com/types/key"
 )
 
-type Tailnet struct {
-	tsnetStateDir string
-	Hostname      string
+type stateView struct {
+	//// From Notify.*
+	// State is the current state of the Tailscale connection.
+	State *ipn.State
+	// ErrMessage, if non-nil, contains a critical error message.
+	// For State InUseOtherUser, ErrMessage is not critical and just contains the details.
+	ErrMessage *string
+	// BrowseToURL, if non-nil, UI should open a browser right now
+	BrowseToURL *string
 
-	State  *stateMachine
+	//// From Notify.NetMap.*
+	// SelfNode is the current node's view of itself.
+	SelfNode tailcfg.NodeView
+	// MagicDNSSuffix is the MagicDNS suffix for the Tailnet, if any.
+	// This can be used for routing but will not work for shared-in nodes or if magic DNS is disabled.
+	MagicDNSSuffix string
+
+	// Peers is the list of peers in the Tailnet.
+	Peers []tailcfg.NodeView
+	// DisplayMessages are the list of health check problems for this
+	// node from the perspective of the control plane.
+	// If empty, there are no known problems from the control plane's
+	// point of view, but the node might know about its own health
+	// check problems.
+	DisplayMessages map[tailcfg.DisplayMessageID]tailcfg.DisplayMessage
+}
+
+func (s stateView) MergeWithNotify(n *ipn.Notify) stateView {
+	if n.State != nil {
+		s.State = n.State
+	}
+	if n.ErrMessage != nil {
+		s.ErrMessage = n.ErrMessage
+	}
+	if n.BrowseToURL != nil {
+		s.BrowseToURL = n.BrowseToURL
+	}
+	if n.NetMap != nil {
+		s.SelfNode = n.NetMap.SelfNode
+		if n.NetMap.SelfNode.Valid() && n.NetMap.SelfNode.Name() != "" {
+			// TODO: Explicitly error out if magic DNS is disabled
+			// Or find a sane way to handle these cases.
+			magicDNSSuffix := extractMagicDNSSuffix(n.NetMap.SelfNode.Name())
+			if magicDNSSuffix != "" {
+				s.MagicDNSSuffix = magicDNSSuffix
+			}
+		}
+		s.Peers = n.NetMap.Peers
+		s.DisplayMessages = n.NetMap.DisplayMessages
+	}
+	return s
+}
+
+// Example: "host.tail-scale.ts.net." -> "tail-scale.ts.net"
+// Just removed any trailing dot and the first label.
+func extractMagicDNSSuffix(fqdn string) string {
+	fqdn = strings.TrimSuffix(fqdn, ".")
+	parts := strings.SplitN(fqdn, ".", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return ""
+}
+
+func (s stateView) String() string {
+	var sb strings.Builder
+	sb.WriteString("stateView{")
+	if s.State != nil {
+		fmt.Fprintf(&sb, "state=%v ", *s.State)
+	}
+	if s.ErrMessage != nil {
+		fmt.Fprintf(&sb, "err=%q ", *s.ErrMessage)
+	}
+	if s.BrowseToURL != nil {
+		fmt.Fprintf(&sb, "url=%q ", *s.BrowseToURL)
+	}
+
+	if s.SelfNode.Valid() {
+		fmt.Fprintf(&sb, "selfNode=%v ", s.SelfNode.ComputedName())
+	}
+	if len(s.Peers) > 0 {
+		fmt.Fprintf(&sb, "peers=%d ", len(s.Peers))
+	}
+	if len(s.DisplayMessages) > 0 {
+		fmt.Fprintf(&sb, "displayMessages=%d ", len(s.DisplayMessages))
+	}
+	str := sb.String()
+	if str == "stateView{" {
+		return "stateView{}"
+	} else {
+		return str[0:len(str)-1] + "}"
+	}
+}
+
+type Tailnet struct {
+	tsnetStateDir   string
+	userSetHostname string
+
+	latestState stateView
+
 	logger *logging.Logger
 
 	server     *tsnet.Server
 	watcher    *watcher
 	socksProxy *socks.Server
-
-	needsStateRefreshRetry   *time.Timer
-	needsStateRefreshRetryMu *sync.Mutex
 
 	lifecycleMu *sync.RWMutex
 }
@@ -39,13 +130,19 @@ func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *
 	}
 
 	return &Tailnet{
-		tsnetStateDir:            tsnetStateDir,
-		Hostname:                 hostname,
-		State:                    newStateMachine(),
-		logger:                   logger,
-		lifecycleMu:              &sync.RWMutex{},
-		needsStateRefreshRetryMu: &sync.Mutex{},
+		tsnetStateDir:   tsnetStateDir,
+		userSetHostname: hostname,
+		logger:          logger,
+		lifecycleMu:     &sync.RWMutex{},
 	}
+}
+
+func (t *Tailnet) LatestState() stateView {
+	return t.latestState
+}
+
+func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
+	t.latestState = t.latestState.MergeWithNotify(n)
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
@@ -54,28 +151,21 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	}
 	defer t.lifecycleMu.Unlock()
 
-	if !t.State.Disabled() {
-		return errors.New("tailnet that is not disabled cannot be started")
-	}
-
-	if t.State.Disabling() {
-		return errors.New("tailnet that is currently disabling cannot be started")
+	if t.latestState.State != nil && *t.latestState.State != ipn.Stopped && *t.latestState.State != ipn.NoState {
+		return errors.New("tailnet that is already started cannot be started again")
 	}
 
 	t.logger.Printf("Starting tailnet")
 
-	// Explicitly set the status to connecting BEFORE we do more work.
-	t.State.SetConnecting(ctx, "tailnet_start")
-
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
-		Hostname: t.Hostname,
+		Hostname: t.userSetHostname,
 	}
 
 	socksProxy, err := socks.NewServer(t.Dial)
 	if err != nil {
 		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
-		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
+		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
 		return err
 	}
 	t.socksProxy = socksProxy
@@ -89,9 +179,25 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	err = t.server.Start()
 	if err != nil {
 		t.logger.Printf("failed to start tsnet server: %v", err)
-		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
+		// If we fail to start the server, we should stop the watcher and socks proxy that we started since they won't be functional without the server.
+		t.watcher.Stop()
+		t.watcher = nil
+		err := t.socksProxy.Close()
+		if err != nil {
+			t.logger.Printf("failed to close SOCKS5 proxy after server start failure: %v", err)
+		}
+		t.socksProxy = nil
 		return err
 	}
+
+	// Force the starting state into our world view
+	starting := new(ipn.State)
+	*starting = ipn.Starting
+	t.UpdateLatestState(&ipn.Notify{
+		State: starting,
+	})
+
+	// All other state is kept on purpose!
 
 	return nil
 }
@@ -102,44 +208,11 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	}
 	defer t.lifecycleMu.Unlock()
 
-	if t.State.Disabling() {
-		return errors.New("tailnet that is currently disabling cannot be stopped")
-	}
-
-	if t.State.Disabled() {
-		return errors.New("tailnet that is disabled cannot be stopped")
+	if t.latestState.State == nil || *t.latestState.State == ipn.Stopped {
+		return errors.New("tailnet that is not started cannot be stopped")
 	}
 
 	t.logger.Printf("Stopping tailnet")
-
-	// Mark as disabling so the UI can render a disconnecting state while shutdown is in flight.
-	// We can't directly set to disabled here since we need to wait for the server and watcher to fully stop.
-	// If we were to set to disabled immediately, we would allow connecting again before the server is fully stopped which would cause issues.
-	// The lifecycleMu does the heavy lifting but the state is important for the UI.
-	t.State.SetDisabling(ctx, "tailnet_stop")
-
-	// Cancel any pending retry timers
-	t.cancelRefreshRetry()
-
-	// I'm a horrible person but I want to see our disabling state so we sleep for a moment here :sorry-not-sorry:
-	time.Sleep(1 * time.Second)
-
-	if t.watcher != nil {
-		t.logger.Printf("Stopping watcher")
-		t.watcher.Stop()
-		t.watcher = nil
-		t.logger.Printf("Watcher stopped")
-	}
-	if t.server != nil {
-		t.logger.Printf("Stopping tsnet server")
-		err := t.server.Close()
-		if err != nil {
-			t.logger.Printf("failed to close tsnet server: %v", err)
-			return err
-		}
-		t.server = nil
-		t.logger.Printf("tsnet server stopped")
-	}
 
 	if t.socksProxy != nil {
 		t.logger.Printf("Stopping SOCKS5 proxy")
@@ -152,160 +225,60 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		t.logger.Printf("SOCKS5 proxy stopped")
 	}
 
-	// Set disabled after the server and watcher are fully stopped.
-	t.State.SetDisabled(ctx, "tailnet_stopped")
+	if t.watcher != nil {
+		t.logger.Printf("Stopping watcher")
+		t.watcher.Stop()
+		t.watcher = nil
+		t.logger.Printf("Watcher stopped")
+	}
+
+	// Force the stopped state into our world view
+	// as soon as the watcher has been stopped
+	// otherwise it might overwrite our state again.
+	stopped := new(ipn.State)
+	*stopped = ipn.Stopped
+	t.UpdateLatestState(&ipn.Notify{
+		State: stopped,
+	})
+
+	if t.server != nil {
+		t.logger.Printf("Stopping tsnet server")
+		err := t.server.Close()
+		if err != nil {
+			t.logger.Printf("failed to close tsnet server: %v", err)
+			return err
+		}
+		t.server = nil
+		t.logger.Printf("tsnet server stopped")
+	}
 
 	t.logger.Printf("Tailnet stopped successfully")
 
 	return nil
 }
 
-func (t *Tailnet) RefreshState(ctx context.Context) (map[key.NodePublic]*ipnstate.PeerStatus, error) {
-	if !t.lifecycleMu.TryRLock() {
-		return nil, errors.New("tailnet is in the process of starting or stopping")
-	}
-	defer t.lifecycleMu.RUnlock()
-
-	t.cancelRefreshRetry()
-
-	t.logger.Printf("Refreshing tailnet state")
-
-	if t.State.Disabling() {
-		return nil, errors.New("tailnet that is currently disabling cannot refresh state")
-	}
-
-	if t.State.Disabled() {
-		return nil, errors.New("tailnet that is disabled cannot refresh state")
-	}
-
-	lc, err := t.server.LocalClient()
-	if err != nil {
-		err = errors.New("failed to get local client: " + err.Error())
-		t.logger.Println(err.Error())
-
-		return nil, err
-	}
-
-	status, err := lc.Status(ctx)
-	if err != nil {
-		err = errors.New("failed to get status: " + err.Error())
-		t.logger.Println(err.Error())
-
-		return nil, err
-	}
-
-	// If the status is nil also fail
-	if status == nil {
-		err = errors.New("failed to get status: status is nil")
-		t.logger.Println(err.Error())
-
-		return nil, err
-	}
-
-	t.logger.Println("Tailnet state fetched successfully")
-
-	if status.Self != nil {
-		t.logger.Printf("Updating hostname from status: %s", status.Self.HostName)
-		t.Hostname = status.Self.HostName
-	}
-
-	// TODO: Guard against connecting to a different tailnet than we had before?
-
-	t.logger.Printf("Updating state machine based on backend state: %s", status.BackendState)
-	switch status.BackendState {
-	case ipn.NoState.String(), ipn.Stopped.String():
-		// TODO: We can't set disabled here since that's different?
-		// What should we do?
-		// For now we just treat it as connecting
-		t.State.SetConnecting(ctx, "backend_state_no_state_or_stopped")
-	case ipn.Starting.String():
-		t.State.SetConnecting(ctx, "backend_state_starting")
-	case ipn.NeedsLogin.String():
-		if status.AuthURL == "" {
-			t.logger.Printf("AuthURL is not yet available in NeedsLogin state, keeping in current state and scheduling refresh retry")
-			// Schedule retry if AuthURL is not yet available
-			t.scheduleRefreshRetry(ctx, "NeedsLogin state missing AuthURL")
-			t.logger.Printf("Exiting RefreshState early without updating state machine due to missing AuthURL in NeedsLogin state (async retry scheduled)")
-			return status.Peer, nil
-		} // AuthURL is available, transition to NeedsLogin state
-		t.State.SetNeedsLogin(ctx, "backend_state_needs_login", status.AuthURL)
-
-	case ipn.NeedsMachineAuth.String():
-		if status.CurrentTailnet == nil || status.CurrentTailnet.MagicDNSSuffix == "" {
-			t.logger.Printf("MagicDNSSuffix is not yet available in NeedsMachineAuth state, keeping in current state and scheduling refresh retry")
-			// Schedule retry if MagicDNSSuffix is not yet available
-			t.scheduleRefreshRetry(ctx, "NeedsMachineAuth state missing MagicDNSSuffix")
-			t.logger.Printf("Exiting RefreshState early without updating state machine due to missing MagicDNSSuffix in NeedsMachineAuth state (async retry scheduled)")
-			return status.Peer, nil
-		}
-		t.State.SetNeedsMachineAuth(ctx, "backend_state_needs_machine_auth", status.CurrentTailnet.MagicDNSSuffix)
-	case ipn.Running.String():
-		if status.CurrentTailnet == nil || status.CurrentTailnet.MagicDNSSuffix == "" {
-			t.logger.Printf("MagicDNSSuffix is not yet available in Running state, keeping in current state and scheduling refresh retry")
-			// Schedule retry if MagicDNSSuffix is not yet available
-			t.scheduleRefreshRetry(ctx, "Running state missing MagicDNSSuffix")
-			t.logger.Printf("Exiting RefreshState early without updating state machine due to missing MagicDNSSuffix in Running state (async retry scheduled)")
-			return status.Peer, nil
-		}
-		t.State.SetConnected(ctx, "backend_state_running", status.CurrentTailnet.MagicDNSSuffix)
-	default:
-		panic("unknown backend state: " + status.BackendState)
-	}
-
-	t.logger.Printf("Tailnet state refreshed successfully: %s", t.State.Description())
-
-	return status.Peer, nil
-}
-
 func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
+	// TODO: Do we still need this lifecycle lock for Dial?
+	// Depends on the rest of tsnets and our error handling.
 	if !t.lifecycleMu.TryRLock() {
 		return nil, errors.New("tailnet is in the process of starting or stopping")
 	}
 	defer t.lifecycleMu.RUnlock()
-
-	if t.State.Disabling() {
-		return nil, errors.New("tailnet that is currently disabling cannot dial")
-	}
-
-	if t.State.Disabled() {
-		return nil, errors.New("tailnet that is disabled cannot dial")
-	}
 
 	return t.server.Dial(ctx, network, address)
 }
 
-func (t *Tailnet) SocksAddr() string {
+func (t *Tailnet) SocksAddr() (string, bool) {
+	// TODO: Do we still need this lifecycle lock for SocksAddr?
+	// Depends on the rest of tsnets and our error handling.
+	if !t.lifecycleMu.TryRLock() {
+		return "", false
+	}
+	defer t.lifecycleMu.RUnlock()
+
 	if t.socksProxy == nil {
 		panic("socks proxy is not initialized")
 	}
 
-	return t.socksProxy.Addr()
-}
-
-// cancelRefreshRetry cancels any pending state refresh retry.
-func (t *Tailnet) cancelRefreshRetry() {
-	t.needsStateRefreshRetryMu.Lock()
-	if t.needsStateRefreshRetry != nil {
-		t.needsStateRefreshRetry.Stop()
-		t.needsStateRefreshRetry = nil
-	}
-	t.needsStateRefreshRetryMu.Unlock()
-}
-
-// scheduleRefreshRetry schedules a state refresh to be retried.
-func (t *Tailnet) scheduleRefreshRetry(ctx context.Context, reason string) {
-	t.needsStateRefreshRetryMu.Lock()
-	defer t.needsStateRefreshRetryMu.Unlock()
-
-	t.logger.Printf("Scheduling state refresh retry: %s", reason)
-	if t.needsStateRefreshRetry != nil {
-		t.needsStateRefreshRetry.Stop()
-	}
-	t.needsStateRefreshRetry = time.AfterFunc(500*time.Millisecond, func() {
-		t.logger.Printf("Retrying state refresh: %s", reason)
-		_, err := t.RefreshState(ctx)
-		if err != nil {
-			t.logger.Printf("State refresh retry failed: %v", err)
-		}
-	})
+	return t.socksProxy.Addr(), true
 }
