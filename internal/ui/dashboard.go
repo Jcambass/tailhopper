@@ -52,6 +52,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 			ID:         tailnet.ID(),
 			BaseDomain: bestEffortDomain,
 			Hostname:   hostname,
+			Transition: tailnet.TransitionState(),
 		}
 
 		if state.State == nil {
@@ -62,7 +63,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 
 		switch *state.State {
 		case ipn.NoState:
-			card.StateClass = "disabled"
+			card.StateClass = "connecting"
 		case ipn.InUseOtherUser:
 			// should never happen to us. Consider failure for now.
 			logger.Printf("dashboard: unexpected state InUseOtherUser for tailnet")
@@ -133,6 +134,12 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		default:
 			logger.Printf("dashboard: unknown state: %s", state.String())
 			card.StateClass = "error"
+		}
+
+		if card.Transition == "starting" {
+			card.StateClass = "connecting"
+		} else if card.Transition == "stopping" {
+			card.StateClass = "disabling"
 		}
 
 		data.Tailnets = append(data.Tailnets, card)

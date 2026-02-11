@@ -120,6 +120,8 @@
         <!-- Non-connected state: show state card -->
         {{if eq .StateClass "disabled"}}
           {{template "state_card_disabled" .}}
+        {{else if eq .StateClass "disabling"}}
+          {{template "state_card_disabling" .}}
         {{else if eq .StateClass "connecting"}}
           {{template "state_card_connecting" .}}
         {{else if eq .StateClass "needs-login"}}

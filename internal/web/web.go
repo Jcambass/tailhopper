@@ -61,7 +61,7 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 
 	// Tailnet handlers - must be registered before the general /tailnet/ pattern
 	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry, sseBroadcast)))
-	mux.Handle("/tailnet/", withRequestLogging(createTailnetToggleHandler(registry, sseBroadcast)))
+	mux.Handle("/tailnet/", withRequestLogging(createTailnetHandler(registry, sseBroadcast)))
 
 	rootHandler := withRequestContext(withRecovery(mux))
 
@@ -84,23 +84,35 @@ func (s *Server) Start() error {
 	return s.server.ListenAndServe()
 }
 
-// handleTailnetToggle returns an HTTP handler for toggling a tailnet's connection state.
-// Path format: /tailnet/{id}/toggle
-func createTailnetToggleHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
+// createTailnetHandler returns an HTTP handler for tailnet start/stop operations.
+// Path format: /tailnet/{id}/start or /tailnet/{id}/stop
+func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
-		// Extract tailnet ID from path: /tailnet/{id}/toggle
-		if !strings.HasSuffix(r.URL.Path, "/toggle") {
-			http.Error(w, "not found", http.StatusNotFound)
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
+		// Extract tailnet ID and action from path: /tailnet/{id}/start or /tailnet/{id}/stop
 		pathWithoutPrefix := strings.TrimPrefix(r.URL.Path, "/tailnet/")
-		id := strings.TrimSuffix(pathWithoutPrefix, "/toggle")
+		parts := strings.Split(pathWithoutPrefix, "/")
+		if len(parts) != 2 {
+			http.Error(w, "invalid path", http.StatusNotFound)
+			return
+		}
+
+		id := parts[0]
+		action := parts[1]
 
 		if id == "" {
 			http.Error(w, "missing tailnet id", http.StatusBadRequest)
+			return
+		}
+
+		if action != "start" && action != "stop" {
+			http.Error(w, "invalid action, must be 'start' or 'stop'", http.StatusBadRequest)
 			return
 		}
 
@@ -110,26 +122,14 @@ func createTailnetToggleHandler(registry *ts.Registry, sseBroadcast *SSEBroadcas
 			return
 		}
 
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-
-		enabled := r.FormValue("enabled") != ""
-		if enabled {
+		if action == "start" {
 			if err := tailnet.Start(r.Context()); err != nil {
 				logger.Printf("failed to start tailnet: %v", err)
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		} else {
-			// Stop synchronously to provide proper feedback
+		} else { // stop
 			if err := tailnet.Stop(r.Context()); err != nil {
 				logger.Printf("failed to stop tailnet: %v", err)
 				http.Error(w, err.Error(), http.StatusConflict)
@@ -138,9 +138,7 @@ func createTailnetToggleHandler(registry *ts.Registry, sseBroadcast *SSEBroadcas
 			w.WriteHeader(http.StatusNoContent)
 		}
 
-		// Note: No manual SSE broadcast needed here. Start() and Stop() already
-		// call UpdateLatestState() which triggers the stateNotifier callback,
-		// and the watcher will broadcast subsequent state changes.
+		// Note: SSE broadcasts state changes.
 	})
 }
 

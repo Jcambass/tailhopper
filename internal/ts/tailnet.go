@@ -116,6 +116,8 @@ type Tailnet struct {
 	socksPort       int
 
 	latestState stateView
+	transitionMu sync.RWMutex
+	transition   string
 
 	logger *logging.Logger
 
@@ -159,6 +161,26 @@ func (t *Tailnet) LatestState() stateView {
 	return t.latestState
 }
 
+func (t *Tailnet) TransitionState() string {
+	t.transitionMu.RLock()
+	defer t.transitionMu.RUnlock()
+	return t.transition
+}
+
+func (t *Tailnet) setTransition(state string) {
+	t.transitionMu.Lock()
+	if t.transition == state {
+		t.transitionMu.Unlock()
+		return
+	}
+	t.transition = state
+	t.transitionMu.Unlock()
+
+	if t.stateNotifier != nil {
+		t.stateNotifier()
+	}
+}
+
 func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
 	oldSuffix := t.latestState.MagicDNSSuffix
 	t.latestState = t.latestState.mergeWithNotify(n)
@@ -180,7 +202,9 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	if !t.lifecycleMu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
+	t.setTransition("starting")
 	defer t.lifecycleMu.Unlock()
+	defer t.setTransition("")
 
 	if t.latestState.State != nil && *t.latestState.State != ipn.Stopped && *t.latestState.State != ipn.NoState {
 		return errors.New("tailnet that is already started cannot be started again")
@@ -237,13 +261,25 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	if !t.lifecycleMu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
+	t.setTransition("stopping")
 	defer t.lifecycleMu.Unlock()
+	defer t.setTransition("")
 
 	if t.latestState.State == nil || *t.latestState.State == ipn.Stopped {
 		return errors.New("tailnet that is not started cannot be stopped")
 	}
 
 	t.logger.Printf("Stopping tailnet")
+
+	// Force the stopped state into our world view
+	// as soon as as we can.
+	// The watcher will auto stop itself when it sees the stopped state.
+	// This ensures that our state won't get overridden by other notifications that might still be coming in from the server during shutdown.
+	stopped := new(ipn.State)
+	*stopped = ipn.Stopped
+	t.UpdateLatestState(&ipn.Notify{
+		State: stopped,
+	})
 
 	if t.socksProxy != nil {
 		t.logger.Printf("Stopping SOCKS5 proxy")
@@ -256,21 +292,16 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		t.logger.Printf("SOCKS5 proxy stopped")
 	}
 
+	// Stop the watcher after we signal the stopped state.
+	// The watcher will also stop itself when it sees the stopped state.
+	// But this is still needed since the watcher might be blocked waiting for notification
+	// /and won't see the stopped state until it receives one.
 	if t.watcher != nil {
 		t.logger.Printf("Stopping watcher")
 		t.watcher.Stop()
 		t.watcher = nil
 		t.logger.Printf("Watcher stopped")
 	}
-
-	// Force the stopped state into our world view
-	// as soon as the watcher has been stopped
-	// otherwise it might overwrite our state again.
-	stopped := new(ipn.State)
-	*stopped = ipn.Stopped
-	t.UpdateLatestState(&ipn.Notify{
-		State: stopped,
-	})
 
 	if t.server != nil {
 		t.logger.Printf("Stopping tsnet server")

@@ -7,22 +7,27 @@
 {{end}}
 
 {{define "tailnet_toggle_inner"}}
-  <input
-    type="checkbox"
-    name="enabled"
+  <button
+    type="button"
+    class="tailnet-toggle{{if ne .StateClass "disabled"}} is-on{{end}}{{if eq .Transition "starting"}} is-on{{end}}"
     aria-label="Tailnet connection"
-    hx-post="/tailnet/{{.ID}}/toggle"
-    hx-trigger="change"
+    aria-pressed="{{if ne .StateClass "disabled"}}true{{else}}false{{end}}"
+    hx-post="/tailnet/{{.ID}}/{{if ne .StateClass "disabled"}}stop{{else}}start{{end}}"
+    hx-trigger="click"
+    hx-sync="this:drop"
     hx-swap="none"
-    {{if ne .StateClass "disabled"}}checked{{end}}
+    hx-indicator="#tailnet-toggle-indicator-{{.ID}}"
+    {{if ne .Transition ""}}disabled{{end}}
   >
-  <span class="toggle-slider"></span>
+    <span class="toggle-slider" aria-hidden="true"></span>
+    <span id="tailnet-toggle-indicator-{{.ID}}" class="toggle-indicator htmx-indicator" aria-hidden="true"></span>
+  </button>
 {{end}}
 
 {{define "tailnet_toggle"}}
-  <label id="tailnet-toggle-{{.ID}}" class="tailnet-toggle" title="Disconnect from tailnet">
+  <div id="tailnet-toggle-{{.ID}}" class="tailnet-toggle-wrap" title="Disconnect from tailnet">
     {{template "tailnet_toggle_inner" .}}
-  </label>
+  </div>
 {{end}}
 
 {{define "tailnet_header"}}

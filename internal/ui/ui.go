@@ -63,6 +63,7 @@ type tailnetCard struct {
 	Machines   []machineView
 	StateClass string // "connected", "needs-login", "connecting"
 	AuthURL    string
+	Transition string
 }
 
 // machineView represents a machine for display.
