@@ -128,6 +128,7 @@ type Tailnet struct {
 	tsnetStateDir   string
 	userSetHostname string
 	socksPort       int
+	lockedDomain    string
 
 	latestState    stateView
 	lifecycleMu    sync.RWMutex
@@ -157,6 +158,7 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 		tsnetStateDir:   tsnetStateDir,
 		userSetHostname: hostname,
 		socksPort:       socksPort,
+		lockedDomain:    lockedDomain,
 		logger:          logger,
 		lifecycleOpMu:   &sync.RWMutex{},
 		lifecycleState:  LifecycleStopped,
@@ -170,6 +172,14 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 
 func (t *Tailnet) ID() string {
 	return t.id
+}
+
+func (t *Tailnet) LockedDomain() string {
+	return t.lockedDomain
+}
+
+func (t *Tailnet) setLockedDomain(domain string) {
+	t.lockedDomain = domain
 }
 
 func (t *Tailnet) LatestState() stateView {
@@ -229,7 +239,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	// Reset previous state
 	t.latestState = stateView{
-		MagicDNSSuffix: t.latestState.MagicDNSSuffix, // Preserve locked domain if it exists
+		MagicDNSSuffix: t.lockedDomain, // Preserve locked domain
 	}
 
 	t.server = &tsnet.Server{
@@ -327,17 +337,6 @@ func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, 
 	return t.server.Dial(ctx, network, address)
 }
 
-func (t *Tailnet) SocksAddr() (string, bool) {
-	// TODO: Do we still need this lifecycle lock for SocksAddr?
-	// Depends on the rest of tsnets and our error handling.
-	if !t.lifecycleOpMu.TryRLock() {
-		return "", false
-	}
-	defer t.lifecycleOpMu.RUnlock()
-
-	if t.socksProxy == nil {
-		panic("SocksAddr is called but socksProxy is nil. This should never happen because SocksAddr should only be called when the tailnet is started, and socksProxy is initialized in Start(). If this panic happens, it indicates a bug in the lifecycle management of the tailnet.")
-	}
-
-	return t.socksProxy.Addr(), true
+func (t *Tailnet) SocksAddr() string {
+	return fmt.Sprintf("localhost:%d", t.socksPort)
 }

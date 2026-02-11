@@ -8,7 +8,6 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/ts"
-	"tailscale.com/ipn"
 )
 
 // URLPath is the default URL path for serving the PAC file.
@@ -32,24 +31,16 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 	var suffixes []string
 
 	for _, t := range tailnets {
-		state := t.LatestState()
-		lifecycleState := t.LifecycleState()
-		if lifecycleState == ts.LifecycleStopping || lifecycleState == ts.LifecycleStopped {
-			continue
-		}
-		if state.State == nil || *state.State != ipn.Running {
-			continue
-		}
-		if state.MagicDNSSuffix == "" {
-			panic("running state without magicDNSSuffix should not happen!")
-		}
-		suffixes = append(suffixes, state.MagicDNSSuffix)
-		socksAddr, ready := t.SocksAddr()
-		if !ready {
+		lockedDomain := t.LockedDomain()
+		// Skip tailnets without a configured domain
+		if lockedDomain == "" {
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", state.MagicDNSSuffix))
+		suffixes = append(suffixes, lockedDomain)
+		socksAddr := t.SocksAddr()
+
+		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", lockedDomain))
 		sb.WriteString(fmt.Sprintf("        return \"SOCKS5 %s; SOCKS %s; DIRECT\";\n", socksAddr, socksAddr))
 		sb.WriteString("    }\n")
 	}

@@ -13,6 +13,7 @@ type watcher struct {
 	tailnet       *Tailnet
 	ipnBusWatcher *local.IPNBusWatcher
 	wg            *sync.WaitGroup
+	cancel        context.CancelFunc
 	logger        *logging.Logger
 }
 
@@ -26,11 +27,14 @@ func newWatcher(tailnet *Tailnet) *watcher {
 
 func (w *watcher) Start() {
 	w.logger.Printf("Starting IPN watcher")
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	ctx = logging.WithContext(ctx, w.logger)
+
 	w.wg.Go(func() {
 		defer logging.CatchPanic(w.logger)
 		defer w.logger.Printf("IPN watcher goroutine exiting")
 
-		ctx := logging.WithContext(context.Background(), w.logger)
 		// TODO: Do we need something like this?
 		// Wait a moment for tsnet to initialize
 		//time.Sleep(500 * time.Millisecond)
@@ -73,6 +77,9 @@ func (w *watcher) Start() {
 
 func (w *watcher) Stop() {
 	if w.ipnBusWatcher != nil {
+		// TODO: Are all these needed?
+		w.logger.Printf("Canceling IPN watcher ctx")
+		w.cancel()
 		w.logger.Printf("Closing IPN watcher")
 		w.ipnBusWatcher.Close()
 		w.ipnBusWatcher = nil

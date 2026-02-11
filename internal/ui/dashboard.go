@@ -100,18 +100,11 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		case ipn.Starting:
 			card.StateClass = "connecting"
 		case ipn.Running:
-			socksAddr, ready := tailnet.SocksAddr()
-			if !ready {
-				logger.Printf("SOCKS5 proxy is not ready yet for tailnet")
-				card.SocksAddr = "N/A"
-				card.SocksHost = "N/A"
-				card.SocksPort = "N/A"
-			} else {
-				socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
-				card.SocksAddr = socksAddr
-				card.SocksHost = socksHost
-				card.SocksPort = socksPort
-			}
+			socksAddr := tailnet.SocksAddr()
+			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+			card.SocksAddr = socksAddr
+			card.SocksHost = socksHost
+			card.SocksPort = socksPort
 
 			// Add peer machines
 			for _, peer := range state.Peers {
