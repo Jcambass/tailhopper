@@ -10,165 +10,137 @@ import (
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"tailscale.com/ipn"
-	"tailscale.com/tailcfg"
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, tailnet *ts.Tailnet) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registry) {
 	logger := logging.FromContext(r.Context()).With("component", "dashboard")
-
-	state := tailnet.LatestState()
-
-	bestEffortDomain := "Tailnet"
-	if state.MagicDNSSuffix != "" {
-		bestEffortDomain = state.MagicDNSSuffix
-	}
 
 	// Base data structure
 	data := dashboardData{
-		PACFileURL: pac.URLPath,
-		Machines:   []machineView{},
-		BaseDomain: bestEffortDomain,
+		PACFileURL:              pac.URLPath,
+		Tailnets:                []tailnetCard{},
+		HasUnconfiguredTailnets: registry.HasUnconfiguredTailnets(),
 	}
 
-	if state.State == nil {
-		disabled(w, logger, &data)
+	// Collect all tailnets from registry
+	tailnets := registry.List()
+	if len(tailnets) == 0 {
+		// No tailnets - render empty dashboard
+		if err := renderTemplate(w, "dashboard.html", data); err != nil {
+			logger.Printf("dashboard: failed to render template: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	switch *state.State {
-	case ipn.NoState:
-		disabled(w, logger, &data)
-		return
-	case ipn.InUseOtherUser:
-		// should never happen to us. Consider failure for now.
-		panic("unexpected state: InUseOtherUser")
-	case ipn.NeedsLogin:
-		// TODO: Guard against nil BrowseToURL.
-		needsLogin(w, logger, &data, *state.BrowseToURL)
-		return
-	case ipn.NeedsMachineAuth:
-		needsMachineAuth(w, logger, &data, bestEffortDomain)
-		return
-	case ipn.Stopped:
-		disabled(w, logger, &data)
-		return
-	case ipn.Starting:
-		connecting(w, logger, &data)
-		return
-	case ipn.Running:
-		socksAddr, ready := tailnet.SocksAddr()
-		if !ready {
-			logger.Printf("SOCKS5 proxy is not ready yet")
-			data.SocksAddr = "N/A"
-			data.SocksHost = "N/A"
-			data.SocksPort = "N/A"
-			// We can still render the dashboard without the SOCKS address, so we continue instead of returning an error.
-		} else {
-			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
-			data.SocksAddr = socksAddr
-			data.SocksHost = socksHost
-			data.SocksPort = socksPort
+	// Render a card for each tailnet
+	for _, tailnet := range tailnets {
+		state := tailnet.LatestState()
+
+		bestEffortDomain := "Tailnet"
+		if state.MagicDNSSuffix != "" {
+			bestEffortDomain = state.MagicDNSSuffix
 		}
 
-		connected(w, logger, &data, state.Peers, bestEffortDomain)
-		return
-	}
+		hostname := ""
+		if state.SelfNode.Valid() {
+			hostname = state.SelfNode.ComputedName()
+		}
 
-	// Default case - should not happen, but just in case render 500
-	logger.Printf("dashboard: unknown state: %s", state.String())
-	http.Error(w, "internal server error", http.StatusInternalServerError)
-}
+		card := tailnetCard{
+			ID:         tailnet.ID(),
+			BaseDomain: bestEffortDomain,
+			Hostname:   hostname,
+		}
 
-func connected(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, peer []tailcfg.NodeView, suffix string) {
-	for _, peer := range peer {
-		if peer.Addresses().Len() == 0 {
+		if state.State == nil {
+			card.StateClass = "disabled"
+			data.Tailnets = append(data.Tailnets, card)
 			continue
 		}
 
-		machineName := peer.ComputedName()
+		switch *state.State {
+		case ipn.NoState:
+			card.StateClass = "disabled"
+		case ipn.InUseOtherUser:
+			// should never happen to us. Consider failure for now.
+			logger.Printf("dashboard: unexpected state InUseOtherUser for tailnet")
+			card.StateClass = "error"
+		case ipn.NeedsLogin:
+			// If we don't have the auth URL yet, treat it as still connecting
+			if state.BrowseToURL == nil || *state.BrowseToURL == "" {
+				card.StateClass = "connecting"
+			} else {
+				card.StateClass = "needs-login"
+				card.AuthURL = *state.BrowseToURL
+			}
+		case ipn.NeedsMachineAuth:
+			card.StateClass = "needs-auth"
+		case ipn.Stopped:
+			card.StateClass = "disabled"
+		case ipn.Starting:
+			card.StateClass = "connecting"
+		case ipn.Running:
+			socksAddr, ready := tailnet.SocksAddr()
+			if !ready {
+				logger.Printf("SOCKS5 proxy is not ready yet for tailnet")
+				card.SocksAddr = "N/A"
+				card.SocksHost = "N/A"
+				card.SocksPort = "N/A"
+			} else {
+				socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
+				card.SocksAddr = socksAddr
+				card.SocksHost = socksHost
+				card.SocksPort = socksPort
+			}
 
-		statusClass := "offline"
-		statusText := "offline"
-		if peer.Online().Get() {
-			statusClass = "online"
-			statusText = "online"
+			// Add peer machines
+			for _, peer := range state.Peers {
+				if peer.Addresses().Len() == 0 {
+					continue
+				}
+
+				machineName := peer.ComputedName()
+
+				statusClass := "offline"
+				statusText := "offline"
+				if peer.Online().Get() {
+					statusClass = "online"
+					statusText = "online"
+				}
+
+				mv := machineView{
+					Name:        machineName,
+					DNSName:     peer.Name(),
+					StatusClass: statusClass,
+					StatusText:  statusText,
+					IPs:         strings.Join(formatIPs(peer.Addresses().AsSlice()), ", "),
+				}
+
+				card.Machines = append(card.Machines, mv)
+			}
+
+			sort.Slice(card.Machines, func(i, j int) bool {
+				// Online machines first, then alphabetically by DNS name
+				if card.Machines[i].StatusClass != card.Machines[j].StatusClass {
+					return card.Machines[i].StatusClass == "online"
+				}
+				return strings.ToLower(card.Machines[i].DNSName) < strings.ToLower(card.Machines[j].DNSName)
+			})
+
+			card.StateClass = "connected"
+		default:
+			logger.Printf("dashboard: unknown state: %s", state.String())
+			card.StateClass = "error"
 		}
 
-		mv := machineView{
-			Name:        machineName,
-			DNSName:     peer.Name(),
-			StatusClass: statusClass,
-			StatusText:  statusText,
-			IPs:         strings.Join(formatIPs(peer.Addresses().AsSlice()), ", "),
-		}
-
-		data.Machines = append(data.Machines, mv)
+		data.Tailnets = append(data.Tailnets, card)
 	}
 
-	sort.Slice(data.Machines, func(i, j int) bool {
-		// Online machines first, then alphabetically by DNS name
-		if data.Machines[i].StatusClass != data.Machines[j].StatusClass {
-			return data.Machines[i].StatusClass == "online"
-		}
-		return strings.ToLower(data.Machines[i].DNSName) < strings.ToLower(data.Machines[j].DNSName)
-	})
-
-	data.BaseDomain = suffix
-	data.StateClass = "connected"
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
 		logger.Printf("dashboard: failed to render template: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
-	}
-}
-
-func disabling(w http.ResponseWriter, logger *logging.Logger, data *dashboardData) {
-	data.StateClass = "disabling"
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-}
-
-func disabled(w http.ResponseWriter, logger *logging.Logger, data *dashboardData) {
-	data.StateClass = "disabled"
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-}
-
-func needsLogin(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, authURL string) {
-	data.StateClass = "needs-login"
-	data.AuthURL = authURL
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-}
-
-func needsMachineAuth(w http.ResponseWriter, logger *logging.Logger, data *dashboardData, suffix string) {
-	data.StateClass = "needs-auth"
-	data.BaseDomain = suffix
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-}
-
-func slowConnecting(w http.ResponseWriter, logger *logging.Logger, data *dashboardData) {
-	data.StateClass = "connecting-slow"
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-}
-
-func connecting(w http.ResponseWriter, logger *logging.Logger, data *dashboardData) {
-	data.StateClass = "connecting"
-	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }

@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/web"
-	"tailscale.com/util/dnsname"
 )
 
 // Tailhopper: A SOCKS5 proxy for personal Tailnet users.
@@ -28,23 +26,11 @@ func main() {
 	baseLogger := logging.New(log.Default(), map[string]string{})
 	logging.SetDefault(baseLogger)
 	logger := baseLogger.With("component", "cmd")
-	ctx := context.Background()
 
-	hostname := os.Getenv("TS_HOSTNAME")
-	if hostname == "" {
-		if realHostname, err := os.Hostname(); err == nil {
-			// Use Tailscale's hostname sanitization logic
-			hostname = dnsname.SanitizeHostname(realHostname) + "-tailhopper"
-		} else {
-			hostname = "tailhopper"
-		}
+	registry, err := ts.NewRegistry("./tailhopper.json", baseLogger)
+	if err != nil {
+		logger.Fatalf("failed to initialize registry: %v", err)
 	}
-
-	// Create Tailnet
-	tailnet := ts.NewTailnet("./tsnet-state", hostname, nil)
-	// TODO: We might not have started the tailnet at this point
-	// But defer makes sense as we write files on disk and want to clean up even if we fail before starting the tailnet
-	defer tailnet.Stop(ctx)
 
 	// Dashboard server on separate port
 	dashboardPort := os.Getenv("HTTP_PORT")
@@ -54,7 +40,7 @@ func main() {
 	dashboardAddr := "127.0.0.1:" + dashboardPort
 
 	// Create dashboard server
-	dashboardSrv := web.NewServer(dashboardAddr, tailnet)
+	dashboardSrv := web.NewServer(dashboardAddr, registry)
 
 	if err := dashboardSrv.Start(); err != nil {
 		logger.Fatalf("dashboard server error: %v", err)

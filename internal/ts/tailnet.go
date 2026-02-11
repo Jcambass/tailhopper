@@ -42,7 +42,7 @@ type stateView struct {
 	DisplayMessages map[tailcfg.DisplayMessageID]tailcfg.DisplayMessage
 }
 
-func (s stateView) MergeWithNotify(n *ipn.Notify) stateView {
+func (s stateView) mergeWithNotify(n *ipn.Notify) stateView {
 	if n.State != nil {
 		s.State = n.State
 	}
@@ -110,6 +110,7 @@ func (s stateView) String() string {
 }
 
 type Tailnet struct {
+	id              string
 	tsnetStateDir   string
 	userSetHostname string
 
@@ -122,19 +123,31 @@ type Tailnet struct {
 	socksProxy *socks.Server
 
 	lifecycleMu *sync.RWMutex
+
+	// domainLocker is called when a domain is detected for this tailnet
+	domainLocker func(domain string) error
 }
 
-func NewTailnet(tsnetStateDir string, hostname string, logger *logging.Logger) *Tailnet {
+func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, logger *logging.Logger, domainLocker func(domain string) error) *Tailnet {
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
 
 	return &Tailnet{
+		id:              id,
 		tsnetStateDir:   tsnetStateDir,
 		userSetHostname: hostname,
 		logger:          logger,
 		lifecycleMu:     &sync.RWMutex{},
+		domainLocker:    domainLocker,
+		latestState: stateView{
+			MagicDNSSuffix: lockedDomain,
+		},
 	}
+}
+
+func (t *Tailnet) ID() string {
+	return t.id
 }
 
 func (t *Tailnet) LatestState() stateView {
@@ -142,7 +155,15 @@ func (t *Tailnet) LatestState() stateView {
 }
 
 func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
-	t.latestState = t.latestState.MergeWithNotify(n)
+	oldSuffix := t.latestState.MagicDNSSuffix
+	t.latestState = t.latestState.mergeWithNotify(n)
+
+	// If we just learned the domain, lock it
+	if oldSuffix == "" && t.latestState.MagicDNSSuffix != "" && t.domainLocker != nil {
+		if err := t.domainLocker(t.latestState.MagicDNSSuffix); err != nil {
+			t.logger.Printf("failed to lock domain %s: %v", t.latestState.MagicDNSSuffix, err)
+		}
+	}
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {

@@ -55,11 +55,10 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 	return sb.String(), suffixes
 }
 
-func Handler(tailnet *ts.Tailnet) http.HandlerFunc {
+func Handler(registry *ts.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context()).With("component", "pac")
-		tailnets := []*ts.Tailnet{tailnet}
-		pac, suffixes := buildPACForTailnets(tailnets)
+		pac, suffixes := buildPACForTailnets(registry.List())
 		logger.Printf("Serving PAC file for suffixes: %s", strings.Join(suffixes, ", "))
 		writePAC(w, pac)
 	}

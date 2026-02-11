@@ -1,0 +1,17 @@
+{{define "add_tailnet"}}
+  <!-- Add New Tailnet Card -->
+  <div class="tailnet-card">
+    <div class="state-body">
+      <p class="state-message">Create a new Tailnet</p>
+      <div class="state-actions">
+        <button 
+          type="button"
+          class="login-button"
+          onclick="fetch('/tailnet/add', {method: 'POST'})"
+        >
+          Create New Tailnet
+        </button>
+      </div>
+    </div>
+  </div>
+{{end}}

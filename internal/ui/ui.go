@@ -47,12 +47,19 @@ func renderTemplate(w http.ResponseWriter, name string, data interface{}) error 
 
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
+	PACFileURL              string
+	Tailnets                []tailnetCard
+	HasUnconfiguredTailnets bool
+}
+
+// tailnetCard contains all data for rendering a single tailnet card.
+type tailnetCard struct {
+	ID         string
 	BaseDomain string
 	Hostname   string
 	SocksAddr  string
 	SocksHost  string
 	SocksPort  string
-	PACFileURL string
 	Machines   []machineView
 	StateClass string // "connected", "needs-login", "connecting"
 	AuthURL    string

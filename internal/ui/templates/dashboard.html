@@ -71,9 +71,6 @@
     </svg>
     <div class="header-text">
       <h1>Tailhopper Dashboard</h1>
-      {{if ne .Hostname ""}}
-      <p class="machine-identity">Connected as <strong>{{.Hostname}}</strong></p>
-      {{end}}
     </div>
   </div>
 
@@ -101,60 +98,33 @@
     </div>
   </div>
 
+  <!-- Tailnets section with polling to detect new tailnets -->
+  <div id="tailnets-container"
+       hx-get="/"
+       hx-trigger="every 1s"
+       hx-target="#tailnets-container"
+       hx-swap="innerHTML"
+       hx-select="#tailnets-container">
+
+    {{range .Tailnets}}
   <div class="tailnet-card">
     <div class="tailnet-header">
       {{template "tailnet_header" .}}
     </div>
-    <div id="content-area"
+    <div id="content-area-{{.ID}}"
          hx-get="/"
          hx-trigger="every 1s"
-         hx-target="#card-body"
-          hx-swap="innerHTML"
-         hx-select="#card-body">
-      <div id="card-body">
+         hx-target="#card-body-{{.ID}}"
+         hx-swap="innerHTML"
+         hx-select="#card-body-{{.ID}}">
+      <div id="card-body-{{.ID}}">
         <div hidden>
           {{template "tailnet_tag_oob" .}}
           {{template "tailnet_toggle_oob" .}}
         </div>
         {{if eq .StateClass "connected"}}
         <!-- connected state: show SOCKS info + machines list -->
-          <div class="tailnet-socks" id="connected-socks-panel" hx-preserve>
-            <div class="tailnet-section-header">
-              <div class="tailnet-section-title">SOCKS5 Proxy</div>
-            </div>
-            <div class="tailnet-socks-row">
-              <div class="tailnet-socks-item">
-                <div class="tailnet-socks-label">Host</div>
-                <div class="tailnet-socks-value">
-                  <code id="socks-host">{{.SocksHost}}</code>
-                  <button class="copy-btn" onclick="copyToClipboard('socks-host')" title="Copy to clipboard">
-                    <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                    <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div class="tailnet-socks-item">
-                <div class="tailnet-socks-label">Port</div>
-                <div class="tailnet-socks-value">
-                  <code id="socks-port">{{.SocksPort}}</code>
-                  <button class="copy-btn" onclick="copyToClipboard('socks-port')" title="Copy to clipboard">
-                    <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                    <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div class="tailnet-socks-item" style="margin-top: 8px;">
-              <div class="tailnet-socks-label">Curl Example</div>
-              <div class="tailnet-socks-value">
-                <code id="socks-curl">curl --socks5-hostname {{.SocksAddr}}</code>
-                <button class="copy-btn" onclick="copyToClipboard('socks-curl')" title="Copy to clipboard">
-                  <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                  <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
+          {{template "socks_panel" .}}
         <div class="tailnet-section-header">
           <div class="tailnet-section-title">Machines</div>
         </div>
@@ -177,6 +147,13 @@
         {{end}}
       </div>
     </div>
+  </div>
+  {{end}}
+
+  <!-- Add New Tailnet Card -->
+  {{if not .HasUnconfiguredTailnets}}
+  {{template "add_tailnet"}}
+  {{end}}
   </div>
 </body>
 </html>
