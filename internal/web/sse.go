@@ -107,12 +107,6 @@ func (b *SSEBroadcaster) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	clientID, eventChan := b.Subscribe(r.Context())
 	defer b.Unsubscribe(clientID)
 
-	// Send initial connection event
-	fmt.Fprintf(w, "event: connected\ndata: connected\n\n")
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
 	// Stream events to client
 	for {
 		select {
