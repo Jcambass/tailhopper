@@ -124,21 +124,23 @@ func createTailnetToggleHandler(registry *ts.Registry, sseBroadcast *SSEBroadcas
 		if enabled {
 			if err := tailnet.Start(r.Context()); err != nil {
 				logger.Printf("failed to start tailnet: %v", err)
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		} else {
-			// Disconnect asynchronously to avoid blocking the response
-			go func() {
-				ctx := logging.WithContext(context.Background(), logger)
-				if err := tailnet.Stop(ctx); err != nil {
-					logger.Printf("failed to disconnect: %v", err)
-				}
-			}()
-			w.WriteHeader(http.StatusAccepted)
+			// Stop synchronously to provide proper feedback
+			if err := tailnet.Stop(r.Context()); err != nil {
+				logger.Printf("failed to stop tailnet: %v", err)
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		}
 
-		// Immediately notify all SSE clients about the toggle
-		sseBroadcast.NotifyStateChange(id)
+		// Note: No manual SSE broadcast needed here. Start() and Stop() already
+		// call UpdateLatestState() which triggers the stateNotifier callback,
+		// and the watcher will broadcast subsequent state changes.
 	})
 }
 
