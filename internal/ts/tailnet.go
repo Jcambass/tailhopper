@@ -15,6 +15,20 @@ import (
 	"tailscale.com/tsnet"
 )
 
+// LifecycleState represents the lifecycle state of a Tailnet.
+type LifecycleState string
+
+const (
+	// LifecycleStopped indicates the Tailnet is fully stopped.
+	LifecycleStopped LifecycleState = "stopped"
+	// LifecycleStopping indicates the Tailnet is shutting down.
+	LifecycleStopping LifecycleState = "stopping"
+	// LifecycleStarted indicates the Tailnet is fully started and running.
+	LifecycleStarted LifecycleState = "started"
+	// LifecycleStarting indicates the Tailnet is starting up.
+	LifecycleStarting LifecycleState = "starting"
+)
+
 type stateView struct {
 	//// From Notify.*
 	// State is the current state of the Tailscale connection.
@@ -115,9 +129,9 @@ type Tailnet struct {
 	userSetHostname string
 	socksPort       int
 
-	latestState stateView
-	transitionMu sync.RWMutex
-	transition   string
+	latestState    stateView
+	lifecycleMu    sync.RWMutex
+	lifecycleState LifecycleState
 
 	logger *logging.Logger
 
@@ -125,7 +139,7 @@ type Tailnet struct {
 	watcher    *watcher
 	socksProxy *socks.Server
 
-	lifecycleMu *sync.RWMutex
+	lifecycleOpMu *sync.RWMutex
 
 	// domainLocker is called when a domain is detected for this tailnet
 	domainLocker func(domain string) error
@@ -144,7 +158,8 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 		userSetHostname: hostname,
 		socksPort:       socksPort,
 		logger:          logger,
-		lifecycleMu:     &sync.RWMutex{},
+		lifecycleOpMu:   &sync.RWMutex{},
+		lifecycleState:  LifecycleStopped,
 		domainLocker:    domainLocker,
 		stateNotifier:   stateNotifier,
 		latestState: stateView{
@@ -161,20 +176,20 @@ func (t *Tailnet) LatestState() stateView {
 	return t.latestState
 }
 
-func (t *Tailnet) TransitionState() string {
-	t.transitionMu.RLock()
-	defer t.transitionMu.RUnlock()
-	return t.transition
+func (t *Tailnet) LifecycleState() LifecycleState {
+	t.lifecycleMu.RLock()
+	defer t.lifecycleMu.RUnlock()
+	return t.lifecycleState
 }
 
-func (t *Tailnet) setTransition(state string) {
-	t.transitionMu.Lock()
-	if t.transition == state {
-		t.transitionMu.Unlock()
+func (t *Tailnet) setLifecycleState(state LifecycleState) {
+	t.lifecycleMu.Lock()
+	if t.lifecycleState == state {
+		t.lifecycleMu.Unlock()
 		return
 	}
-	t.transition = state
-	t.transitionMu.Unlock()
+	t.lifecycleState = state
+	t.lifecycleMu.Unlock()
 
 	if t.stateNotifier != nil {
 		t.stateNotifier()
@@ -199,18 +214,23 @@ func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
-	if !t.lifecycleMu.TryLock() {
+	if !t.lifecycleOpMu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
-	t.setTransition("starting")
-	defer t.lifecycleMu.Unlock()
-	defer t.setTransition("")
-
-	if t.latestState.State != nil && *t.latestState.State != ipn.Stopped && *t.latestState.State != ipn.NoState {
+	if t.LifecycleState() == LifecycleStarting || t.LifecycleState() == LifecycleStarted {
+		t.lifecycleOpMu.Unlock()
 		return errors.New("tailnet that is already started cannot be started again")
 	}
+	t.setLifecycleState(LifecycleStarting)
+	defer t.lifecycleOpMu.Unlock()
+	defer t.setLifecycleState(LifecycleStarted)
 
 	t.logger.Printf("Starting tailnet")
+
+	// Reset previous state
+	t.latestState = stateView{
+		MagicDNSSuffix: t.latestState.MagicDNSSuffix, // Preserve locked domain if it exists
+	}
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
@@ -245,41 +265,22 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Force the starting state into our world view
-	starting := new(ipn.State)
-	*starting = ipn.Starting
-	t.UpdateLatestState(&ipn.Notify{
-		State: starting,
-	})
-
-	// All other state is kept on purpose!
-
 	return nil
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
-	if !t.lifecycleMu.TryLock() {
+	if !t.lifecycleOpMu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
-	t.setTransition("stopping")
-	defer t.lifecycleMu.Unlock()
-	defer t.setTransition("")
-
-	if t.latestState.State == nil || *t.latestState.State == ipn.Stopped {
-		return errors.New("tailnet that is not started cannot be stopped")
+	if t.LifecycleState() == LifecycleStopping || t.LifecycleState() == LifecycleStopped {
+		t.lifecycleOpMu.Unlock()
+		return errors.New("tailnet that is already stopped cannot be stopped again")
 	}
+	t.setLifecycleState(LifecycleStopping)
+	defer t.lifecycleOpMu.Unlock()
+	defer t.setLifecycleState(LifecycleStopped)
 
 	t.logger.Printf("Stopping tailnet")
-
-	// Force the stopped state into our world view
-	// as soon as as we can.
-	// The watcher will auto stop itself when it sees the stopped state.
-	// This ensures that our state won't get overridden by other notifications that might still be coming in from the server during shutdown.
-	stopped := new(ipn.State)
-	*stopped = ipn.Stopped
-	t.UpdateLatestState(&ipn.Notify{
-		State: stopped,
-	})
 
 	if t.socksProxy != nil {
 		t.logger.Printf("Stopping SOCKS5 proxy")
@@ -292,10 +293,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		t.logger.Printf("SOCKS5 proxy stopped")
 	}
 
-	// Stop the watcher after we signal the stopped state.
-	// The watcher will also stop itself when it sees the stopped state.
-	// But this is still needed since the watcher might be blocked waiting for notification
-	// /and won't see the stopped state until it receives one.
 	if t.watcher != nil {
 		t.logger.Printf("Stopping watcher")
 		t.watcher.Stop()
@@ -322,10 +319,10 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
 	// TODO: Do we still need this lifecycle lock for Dial?
 	// Depends on the rest of tsnets and our error handling.
-	if !t.lifecycleMu.TryRLock() {
+	if !t.lifecycleOpMu.TryRLock() {
 		return nil, errors.New("tailnet is in the process of starting or stopping")
 	}
-	defer t.lifecycleMu.RUnlock()
+	defer t.lifecycleOpMu.RUnlock()
 
 	return t.server.Dial(ctx, network, address)
 }
@@ -333,13 +330,13 @@ func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, 
 func (t *Tailnet) SocksAddr() (string, bool) {
 	// TODO: Do we still need this lifecycle lock for SocksAddr?
 	// Depends on the rest of tsnets and our error handling.
-	if !t.lifecycleMu.TryRLock() {
+	if !t.lifecycleOpMu.TryRLock() {
 		return "", false
 	}
-	defer t.lifecycleMu.RUnlock()
+	defer t.lifecycleOpMu.RUnlock()
 
 	if t.socksProxy == nil {
-		panic("socks proxy is not initialized")
+		panic("SocksAddr is called but socksProxy is nil. This should never happen because SocksAddr should only be called when the tailnet is started, and socksProxy is initialized in Start(). If this panic happens, it indicates a bug in the lifecycle management of the tailnet.")
 	}
 
 	return t.socksProxy.Addr(), true

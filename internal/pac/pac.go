@@ -33,6 +33,10 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 
 	for _, t := range tailnets {
 		state := t.LatestState()
+		lifecycleState := t.LifecycleState()
+		if lifecycleState == ts.LifecycleStopping || lifecycleState == ts.LifecycleStopped {
+			continue
+		}
 		if state.State == nil || *state.State != ipn.Running {
 			continue
 		}

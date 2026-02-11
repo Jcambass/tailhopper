@@ -9,15 +9,15 @@
 {{define "tailnet_toggle_inner"}}
   <button
     type="button"
-    class="tailnet-toggle{{if ne .StateClass "disabled"}} is-on{{end}}{{if eq .Transition "starting"}} is-on{{end}}"
+    class="tailnet-toggle{{if or (eq .LifecycleState "started") (eq .LifecycleState "starting")}} is-on{{end}}"
     aria-label="Tailnet connection"
-    aria-pressed="{{if ne .StateClass "disabled"}}true{{else}}false{{end}}"
-    hx-post="/tailnet/{{.ID}}/{{if ne .StateClass "disabled"}}stop{{else}}start{{end}}"
+    aria-pressed="{{if or (eq .LifecycleState "started") (eq .LifecycleState "starting")}}true{{else}}false{{end}}"
+    hx-post="/tailnet/{{.ID}}/{{if or (eq .LifecycleState "started") (eq .LifecycleState "starting")}}stop{{else}}start{{end}}"
     hx-trigger="click"
     hx-sync="this:drop"
     hx-swap="none"
     hx-indicator="#tailnet-toggle-indicator-{{.ID}}"
-    {{if ne .Transition ""}}disabled{{end}}
+    {{if or (eq .LifecycleState "starting") (eq .LifecycleState "stopping")}}disabled{{end}}
   >
     <span class="toggle-slider" aria-hidden="true"></span>
     <span id="tailnet-toggle-indicator-{{.ID}}" class="toggle-indicator htmx-indicator" aria-hidden="true"></span>

@@ -49,14 +49,31 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		}
 
 		card := tailnetCard{
-			ID:         tailnet.ID(),
-			BaseDomain: bestEffortDomain,
-			Hostname:   hostname,
-			Transition: tailnet.TransitionState(),
+			ID:             tailnet.ID(),
+			BaseDomain:     bestEffortDomain,
+			Hostname:       hostname,
+			LifecycleState: string(tailnet.LifecycleState()),
+		}
+
+		switch card.LifecycleState {
+		case string(ts.LifecycleStarting):
+			card.StateClass = "connecting"
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		case string(ts.LifecycleStopping):
+			card.StateClass = "disabling"
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		case string(ts.LifecycleStopped):
+			card.StateClass = "disabled"
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		default:
+			// continue processing
 		}
 
 		if state.State == nil {
-			card.StateClass = "disabled"
+			card.StateClass = "connecting"
 			data.Tailnets = append(data.Tailnets, card)
 			continue
 		}
@@ -134,12 +151,6 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		default:
 			logger.Printf("dashboard: unknown state: %s", state.String())
 			card.StateClass = "error"
-		}
-
-		if card.Transition == "starting" {
-			card.StateClass = "connecting"
-		} else if card.Transition == "stopping" {
-			card.StateClass = "disabling"
 		}
 
 		data.Tailnets = append(data.Tailnets, card)

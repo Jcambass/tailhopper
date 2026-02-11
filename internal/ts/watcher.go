@@ -65,19 +65,6 @@ func (w *watcher) Start() {
 			}
 
 			w.logger.Printf("Received IPN notification: %s", n.String())
-
-			// Stop ourself if we detect that we're in stopped state.
-			// Based on latest state before merging with the new notification.
-			// TODO: Might need synchronization to avoid race condition.
-			// UpdateLatestState also does not lock.
-			stopped := new(ipn.State)
-			*stopped = ipn.Stopped
-			if n.State != nil && w.tailnet.latestState.State == stopped {
-				w.logger.Printf("Detected tailnet stopped state, stopping watcher")
-				w.Stop()
-				return
-			}
-
 			w.tailnet.UpdateLatestState(&n)
 			w.logger.Printf("Updated tailnet state: %s", w.tailnet.LatestState().String())
 		}

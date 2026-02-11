@@ -54,16 +54,16 @@ type dashboardData struct {
 
 // tailnetCard contains all data for rendering a single tailnet card.
 type tailnetCard struct {
-	ID         string
-	BaseDomain string
-	Hostname   string
-	SocksAddr  string
-	SocksHost  string
-	SocksPort  string
-	Machines   []machineView
-	StateClass string // "connected", "needs-login", "connecting"
-	AuthURL    string
-	Transition string
+	ID             string
+	BaseDomain     string
+	Hostname       string
+	SocksAddr      string
+	SocksHost      string
+	SocksPort      string
+	Machines       []machineView
+	StateClass     string // "connected", "needs-login", "connecting"
+	AuthURL        string
+	LifecycleState string
 }
 
 // machineView represents a machine for display.
