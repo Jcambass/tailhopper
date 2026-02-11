@@ -122,7 +122,8 @@ func (b *SSEBroadcaster) ServeSSE(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			fmt.Fprintf(w, "event: update\ndata: %s\n\n", event)
+			// Use event name instead of data for better htmx SSE extension compatibility
+			fmt.Fprintf(w, "event: %s\ndata: update\n\n", event)
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}

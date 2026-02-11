@@ -8,9 +8,10 @@
   <link rel="stylesheet" href="/static/ui.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/idiomorph-ext.min.js"></script>
+  <script src="/static/sse.js"></script>
   <script src="/static/ui.js" defer></script>
 </head>
-<body hx-ext="morph">
+<body hx-ext="morph,sse" sse-connect="/events">
   <div class="dashboard-header">
     <svg class="hopper-icon" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -99,10 +100,10 @@
   </div>
 
   <!-- Tailnets section -->
-  <div id="tailnets-container">
+  <div id="tailnets-container" hx-trigger="sse:global" hx-get="/" hx-select="#tailnets-container" hx-swap="morph">
 
     {{range .Tailnets}}
-  <div class="tailnet-card" id="tailnet-card-{{.ID}}">
+  <div class="tailnet-card" id="tailnet-card-{{.ID}}" hx-trigger="sse:tailnet-{{.ID}}" hx-get="/" hx-select="#tailnet-card-{{.ID}}" hx-swap="morph">
     <div class="tailnet-header">
       {{template "tailnet_header" .}}
     </div>
