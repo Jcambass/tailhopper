@@ -3,6 +3,7 @@ package ts
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -83,7 +84,7 @@ func (m *Registry) Load() error {
 		domainLocker := func(domain string) error {
 			return m.SetLockedDomain(c.ID, domain)
 		}
-		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, m.logger.With("tailnet", c.ID), domainLocker)
+		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker)
 		m.tailnets[c.ID] = tailnet
 		// Update nextID based on loaded IDs
 		if id, err := strconv.Atoi(c.ID); err == nil && id >= m.nextID {
@@ -165,10 +166,17 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 		}
 	}
 
+	// Find an available port for SOCKS proxy
+	socksPort, err := findAvailablePort()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find available port: %w", err)
+	}
+
 	c := Config{
-		ID:       id,
-		StateDir: stateDir,
-		Hostname: hostname,
+		ID:        id,
+		StateDir:  stateDir,
+		Hostname:  hostname,
+		SocksPort: socksPort,
 	}
 
 	m.configs[c.ID] = c
@@ -177,7 +185,7 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 	domainLocker := func(domain string) error {
 		return m.SetLockedDomain(c.ID, domain)
 	}
-	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", m.logger.With("tailnet", c.ID), domainLocker)
+	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker)
 	m.tailnets[c.ID] = tailnet
 
 	if err := m.saveLocked(); err != nil {
@@ -254,4 +262,15 @@ func (m *Registry) HasUnconfiguredTailnets() bool {
 		}
 	}
 	return false
+}
+
+// findAvailablePort finds an available port by temporarily binding to 127.0.0.1:0.
+func findAvailablePort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	addr := listener.Addr().(*net.TCPAddr)
+	return addr.Port, nil
 }

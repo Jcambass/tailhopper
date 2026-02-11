@@ -103,7 +103,7 @@
        hx-get="/"
        hx-trigger="every 1s"
        hx-target="#tailnets-container"
-       hx-swap="innerHTML"
+       hx-swap="morph"
        hx-select="#tailnets-container">
 
     {{range .Tailnets}}
@@ -115,7 +115,7 @@
          hx-get="/"
          hx-trigger="every 1s"
          hx-target="#card-body-{{.ID}}"
-         hx-swap="innerHTML"
+         hx-swap="morph"
          hx-select="#card-body-{{.ID}}">
       <div id="card-body-{{.ID}}">
         <div hidden>

@@ -3,6 +3,7 @@ package socks
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	"github.com/jcambass/tailhopper/internal/logging"
@@ -20,9 +21,10 @@ type Server struct {
 	logger   *logging.Logger
 }
 
-// NewServer creates a new SOCKS5 server.
-func NewServer(dial Dialer) (*Server, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+// NewServer creates a new SOCKS5 server on the specified port.
+func NewServer(dial Dialer, port int) (*Server, error) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}

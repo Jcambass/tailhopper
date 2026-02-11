@@ -113,6 +113,7 @@ type Tailnet struct {
 	id              string
 	tsnetStateDir   string
 	userSetHostname string
+	socksPort       int
 
 	latestState stateView
 
@@ -128,7 +129,7 @@ type Tailnet struct {
 	domainLocker func(domain string) error
 }
 
-func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, logger *logging.Logger, domainLocker func(domain string) error) *Tailnet {
+func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error) *Tailnet {
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
@@ -137,6 +138,7 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 		id:              id,
 		tsnetStateDir:   tsnetStateDir,
 		userSetHostname: hostname,
+		socksPort:       socksPort,
 		logger:          logger,
 		lifecycleMu:     &sync.RWMutex{},
 		domainLocker:    domainLocker,
@@ -183,7 +185,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		Hostname: t.userSetHostname,
 	}
 
-	socksProxy, err := socks.NewServer(t.Dial)
+	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
 		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
