@@ -57,8 +57,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		return errors.New("tailnet that is currently disabling cannot be started")
 	}
 
-	logger := logging.FromContext(ctx).With("component", "tailnet")
-	logger.Printf("Starting tailnet")
+	t.logger.Printf("Starting tailnet")
 
 	// Explicitly set the status to connecting BEFORE we do more work.
 	t.State.SetConnecting(ctx, "tailnet_start")
@@ -70,7 +69,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	socksProxy, err := socks.NewServer(t.Dial)
 	if err != nil {
-		logger.Printf("failed to start SOCKS5 proxy: %v", err)
+		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
 		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
 		return err
 	}
@@ -84,7 +83,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	// Asynchronously start the server
 	err = t.server.Start()
 	if err != nil {
-		logger.Printf("failed to start tsnet server: %v", err)
+		t.logger.Printf("failed to start tsnet server: %v", err)
 		t.State.SetDisabled(ctx, fmt.Sprintf("tailnet_start_failed: %v", err))
 		return err
 	}
@@ -106,8 +105,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		return errors.New("tailnet that is disabled cannot be stopped")
 	}
 
-	logger := logging.FromContext(ctx).With("component", "tailnet")
-	logger.Printf("Stopping tailnet")
+	t.logger.Printf("Stopping tailnet")
 
 	// Mark as disabling so the UI can render a disconnecting state while shutdown is in flight.
 	// We can't directly set to disabled here since we need to wait for the server and watcher to fully stop.
@@ -119,37 +117,37 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	time.Sleep(1 * time.Second)
 
 	if t.watcher != nil {
-		logger.Printf("Stopping watcher")
+		t.logger.Printf("Stopping watcher")
 		t.watcher.Stop()
 		t.watcher = nil
-		logger.Printf("Watcher stopped")
+		t.logger.Printf("Watcher stopped")
 	}
 	if t.server != nil {
-		logger.Printf("Stopping tsnet server")
+		t.logger.Printf("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
-			logger.Printf("failed to close tsnet server: %v", err)
+			t.logger.Printf("failed to close tsnet server: %v", err)
 			return err
 		}
 		t.server = nil
-		logger.Printf("tsnet server stopped")
+		t.logger.Printf("tsnet server stopped")
 	}
 
 	if t.socksProxy != nil {
-		logger.Printf("Stopping SOCKS5 proxy")
+		t.logger.Printf("Stopping SOCKS5 proxy")
 		err := t.socksProxy.Close()
 		if err != nil {
-			logger.Printf("failed to close SOCKS5 proxy: %v", err)
+			t.logger.Printf("failed to close SOCKS5 proxy: %v", err)
 			return err
 		}
 		t.socksProxy = nil
-		logger.Printf("SOCKS5 proxy stopped")
+		t.logger.Printf("SOCKS5 proxy stopped")
 	}
 
 	// Set disabled after the server and watcher are fully stopped.
 	t.State.SetDisabled(ctx, "tailnet_stopped")
 
-	logger.Printf("Tailnet stopped successfully")
+	t.logger.Printf("Tailnet stopped successfully")
 
 	return nil
 }
@@ -160,8 +158,7 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	}
 	defer t.lifecycleMu.RUnlock()
 
-	logger := logging.FromContext(ctx).With("component", "tailnet")
-	logger.Printf("Refreshing tailnet state")
+	t.logger.Printf("Refreshing tailnet state")
 
 	if t.State.Disabling() {
 		return nil, errors.New("tailnet that is currently disabling cannot refresh state")
@@ -174,7 +171,7 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	lc, err := t.server.LocalClient()
 	if err != nil {
 		err = errors.New("failed to get local client: " + err.Error())
-		logger.Println(err.Error())
+		t.logger.Println(err.Error())
 
 		return nil, err
 	}
@@ -182,7 +179,7 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	status, err := lc.Status(ctx)
 	if err != nil {
 		err = errors.New("failed to get status: " + err.Error())
-		logger.Println(err.Error())
+		t.logger.Println(err.Error())
 
 		return nil, err
 	}
@@ -190,21 +187,21 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 	// If the status is nil also fail
 	if status == nil {
 		err = errors.New("failed to get status: status is nil")
-		logger.Println(err.Error())
+		t.logger.Println(err.Error())
 
 		return nil, err
 	}
 
-	logger.Println("Tailnet state fetched successfully")
+	t.logger.Println("Tailnet state fetched successfully")
 
 	if status.Self != nil {
-		logger.Printf("Updating hostname from status: %s", status.Self.HostName)
+		t.logger.Printf("Updating hostname from status: %s", status.Self.HostName)
 		t.Hostname = status.Self.HostName
 	}
 
 	// TODO: Guard against connecting to a different tailnet than we had before?
 
-	logger.Printf("Updating state machine based on backend state: %s", status.BackendState)
+	t.logger.Printf("Updating state machine based on backend state: %s", status.BackendState)
 	switch status.BackendState {
 	case ipn.NoState.String(), ipn.Stopped.String():
 		// TODO: We can't set disabled here since that's different?
@@ -223,7 +220,7 @@ func (t *Tailnet) RefreshState(ctx context.Context) (*ipnstate.Status, error) {
 		panic("unknown backend state: " + status.BackendState)
 	}
 
-	logger.Printf("Tailnet state refreshed successfully: %s", t.State.Description())
+	t.logger.Printf("Tailnet state refreshed successfully: %s", t.State.Description())
 
 	return status, nil
 }
