@@ -98,30 +98,16 @@
     </div>
   </div>
 
-  <!-- Tailnets section with polling to detect new tailnets -->
-  <div id="tailnets-container"
-       hx-get="/"
-       hx-trigger="every 1s"
-       hx-target="#tailnets-container"
-       hx-swap="morph"
-       hx-select="#tailnets-container">
+  <!-- Tailnets section -->
+  <div id="tailnets-container">
 
     {{range .Tailnets}}
-  <div class="tailnet-card">
+  <div class="tailnet-card" id="tailnet-card-{{.ID}}">
     <div class="tailnet-header">
       {{template "tailnet_header" .}}
     </div>
-    <div id="content-area-{{.ID}}"
-         hx-get="/"
-         hx-trigger="every 1s"
-         hx-target="#card-body-{{.ID}}"
-         hx-swap="morph"
-         hx-select="#card-body-{{.ID}}">
+    <div id="content-area-{{.ID}}">
       <div id="card-body-{{.ID}}">
-        <div hidden>
-          {{template "tailnet_tag_oob" .}}
-          {{template "tailnet_toggle_oob" .}}
-        </div>
         {{if eq .StateClass "connected"}}
         <!-- connected state: show SOCKS info + machines list -->
           {{template "socks_panel" .}}

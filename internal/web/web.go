@@ -18,14 +18,22 @@ import (
 
 // Server represents the HTTP server for Tailhopper.
 type Server struct {
-	server *http.Server
-	addr   string
-	logger *logging.Logger
+	server       *http.Server
+	addr         string
+	logger       *logging.Logger
+	sseBroadcast *SSEBroadcaster
 }
 
 // NewServer creates and configures a new HTTP server.
 func NewServer(addr string, registry *ts.Registry) *Server {
 	logger := logging.Default().With("component", "httpserver")
+	sseBroadcast := NewSSEBroadcaster(logger)
+
+	// Wire up SSE notifications from registry
+	registry.SetStateChangeNotifier(func(tailnetID string) {
+		sseBroadcast.NotifyStateChange(tailnetID)
+	})
+
 	mux := http.NewServeMux()
 
 	// Static files
@@ -37,6 +45,11 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 	// PAC file
 	mux.Handle(pac.URLPath, withRequestLogging(pac.Handler(registry)))
 
+	// SSE endpoint
+	mux.Handle("/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sseBroadcast.ServeSSE(w, r)
+	}))
+
 	// Dashboard
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -47,8 +60,8 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 	}))
 
 	// Tailnet handlers - must be registered before the general /tailnet/ pattern
-	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry)))
-	mux.Handle("/tailnet/", withRequestLogging(createTailnetToggleHandler(registry)))
+	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry, sseBroadcast)))
+	mux.Handle("/tailnet/", withRequestLogging(createTailnetToggleHandler(registry, sseBroadcast)))
 
 	rootHandler := withRequestContext(withRecovery(mux))
 
@@ -58,8 +71,9 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 			Handler:           rootHandler,
 			ReadHeaderTimeout: 10 * time.Second,
 		},
-		addr:   addr,
-		logger: logger,
+		addr:         addr,
+		logger:       logger,
+		sseBroadcast: sseBroadcast,
 	}
 }
 
@@ -72,7 +86,7 @@ func (s *Server) Start() error {
 
 // handleTailnetToggle returns an HTTP handler for toggling a tailnet's connection state.
 // Path format: /tailnet/{id}/toggle
-func createTailnetToggleHandler(registry *ts.Registry) http.Handler {
+func createTailnetToggleHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
@@ -122,11 +136,14 @@ func createTailnetToggleHandler(registry *ts.Registry) http.Handler {
 			}()
 			w.WriteHeader(http.StatusAccepted)
 		}
+
+		// Immediately notify all SSE clients about the toggle
+		sseBroadcast.NotifyStateChange(id)
 	})
 }
 
 // createAddTailnetHandler returns an HTTP handler for creating a new tailnet.
-func createAddTailnetHandler(registry *ts.Registry) http.Handler {
+func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
@@ -154,6 +171,9 @@ func createAddTailnetHandler(registry *ts.Registry) http.Handler {
 			logger.Printf("failed to start new tailnet: %v", err)
 			// Don't fail the request, the tailnet was created successfully
 		}
+
+		// Notify about new tailnet (registry also sends notification, but this ensures immediate update)
+		sseBroadcast.NotifyGlobalChange()
 
 		w.WriteHeader(http.StatusCreated)
 	})

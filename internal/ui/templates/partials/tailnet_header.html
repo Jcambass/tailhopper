@@ -6,10 +6,6 @@
   <h2 class="machines-title" id="tailnet-tag-{{.ID}}">{{template "tailnet_tag_inner" .}}</h2>
 {{end}}
 
-{{define "tailnet_tag_oob"}}
-  <h2 class="machines-title" id="tailnet-tag-{{.ID}}" hx-swap-oob="outerHTML">{{template "tailnet_tag_inner" .}}</h2>
-{{end}}
-
 {{define "tailnet_toggle_inner"}}
   <input
     type="checkbox"
@@ -26,12 +22,6 @@
 
 {{define "tailnet_toggle"}}
   <label id="tailnet-toggle-{{.ID}}" class="tailnet-toggle" title="Disconnect from tailnet">
-    {{template "tailnet_toggle_inner" .}}
-  </label>
-{{end}}
-
-{{define "tailnet_toggle_oob"}}
-  <label id="tailnet-toggle-{{.ID}}" class="tailnet-toggle" title="Disconnect from tailnet" hx-swap-oob="outerHTML">
     {{template "tailnet_toggle_inner" .}}
   </label>
 {{end}}

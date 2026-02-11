@@ -127,9 +127,11 @@ type Tailnet struct {
 
 	// domainLocker is called when a domain is detected for this tailnet
 	domainLocker func(domain string) error
+	// stateNotifier is called when the state of this tailnet changes
+	stateNotifier func()
 }
 
-func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error) *Tailnet {
+func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error, stateNotifier func()) *Tailnet {
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
@@ -142,6 +144,7 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 		logger:          logger,
 		lifecycleMu:     &sync.RWMutex{},
 		domainLocker:    domainLocker,
+		stateNotifier:   stateNotifier,
 		latestState: stateView{
 			MagicDNSSuffix: lockedDomain,
 		},
@@ -165,6 +168,11 @@ func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
 		if err := t.domainLocker(t.latestState.MagicDNSSuffix); err != nil {
 			t.logger.Printf("failed to lock domain %s: %v", t.latestState.MagicDNSSuffix, err)
 		}
+	}
+
+	// Notify about the state change
+	if t.stateNotifier != nil {
+		t.stateNotifier()
 	}
 }
 

@@ -38,6 +38,8 @@ type Registry struct {
 	configs map[string]Config
 	// tailnets maps ID to *Tailnet
 	tailnets map[string]*Tailnet
+	// stateChangeNotifier is called when any tailnet state changes
+	stateChangeNotifier func(tailnetID string)
 }
 
 func NewRegistry(path string, logger *logging.Logger) (*Registry, error) {
@@ -84,7 +86,8 @@ func (m *Registry) Load() error {
 		domainLocker := func(domain string) error {
 			return m.SetLockedDomain(c.ID, domain)
 		}
-		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker)
+		stateNotifier := m.createStateNotifier(c.ID)
+		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, stateNotifier)
 		m.tailnets[c.ID] = tailnet
 		// Update nextID based on loaded IDs
 		if id, err := strconv.Atoi(c.ID); err == nil && id >= m.nextID {
@@ -185,7 +188,8 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 	domainLocker := func(domain string) error {
 		return m.SetLockedDomain(c.ID, domain)
 	}
-	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker)
+	stateNotifier := m.createStateNotifier(c.ID)
+	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, stateNotifier)
 	m.tailnets[c.ID] = tailnet
 
 	if err := m.saveLocked(); err != nil {
@@ -193,6 +197,11 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 		delete(m.configs, c.ID)
 		delete(m.tailnets, c.ID)
 		return nil, err
+	}
+
+	// Notify about global change (new tailnet added)
+	if m.stateChangeNotifier != nil {
+		m.stateChangeNotifier("")
 	}
 
 	return tailnet, nil
@@ -208,7 +217,14 @@ func (m *Registry) Delete(id string) error {
 
 	delete(m.configs, id)
 	delete(m.tailnets, id)
-	return m.saveLocked()
+
+	err := m.saveLocked()
+	if err == nil && m.stateChangeNotifier != nil {
+		// Notify about global change (tailnet deleted)
+		m.stateChangeNotifier("")
+	}
+
+	return err
 }
 
 func (m *Registry) Get(id string) (*Tailnet, bool) {
@@ -218,6 +234,7 @@ func (m *Registry) Get(id string) (*Tailnet, bool) {
 	return t, ok
 }
 
+// TODO: Still allows adding two tailnets with same domain!
 // SetLockedDomain updates the LockedDomain for a tailnet.
 // It checks if the domain is already claimed by another tailnet to prevent duplicates.
 func (m *Registry) SetLockedDomain(id string, domain string) error {
@@ -262,6 +279,20 @@ func (m *Registry) HasUnconfiguredTailnets() bool {
 		}
 	}
 	return false
+}
+
+// SetStateChangeNotifier sets the callback for state changes.
+func (m *Registry) SetStateChangeNotifier(notifier func(tailnetID string)) {
+	m.stateChangeNotifier = notifier
+}
+
+// createStateNotifier creates a state notifier function for a specific tailnet.
+func (m *Registry) createStateNotifier(tailnetID string) func() {
+	return func() {
+		if m.stateChangeNotifier != nil {
+			m.stateChangeNotifier(tailnetID)
+		}
+	}
 }
 
 // findAvailablePort finds an available port by temporarily binding to 127.0.0.1:0.
