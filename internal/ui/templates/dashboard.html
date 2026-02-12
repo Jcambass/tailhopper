@@ -81,7 +81,7 @@
     <div class="setup-grid">
       <div class="setup-card">
         <h3>Option 1: PAC File (Recommended)</h3>
-        <p>Configure your browser to use automatic proxy configuration:</p>
+        <p>Configure your browser to use <a href="https://en.wikipedia.org/wiki/Proxy_auto-config" target="_blank">automatic proxy configuration</a>:</p>
         <div class="code-block">
           <code id="pac-url">http://localhost:8888{{.PACFileURL}}</code>
           <button class="copy-btn" onclick="copyToClipboard('pac-url')" title="Copy to clipboard">
@@ -89,12 +89,13 @@
             <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </button>
         </div>
-        <p class="setup-note">This routes only traffic targeted at your configured tailnets through the proxy.</p>
+        <p class="setup-note">Automatically routes each request to the correct tailnet proxy based on the domain.</p>
       </div>
       <div class="setup-card">
         <h3>Option 2: Manual SOCKS5</h3>
         <p>Configure SOCKS5 proxy directly in your browser/app.</p>
-        <p class="setup-note">Use the tailnet card below to find the current host and port when connected.</p>
+        <p class="setup-note">Required for non-HTTP traffic (SSH, databases, etc.) or apps that don't support PAC files.</p>
+        <p class="setup-note">Each connected tailnet card below shows its proxy host and port.</p>
       </div>
     </div>
   </div>
