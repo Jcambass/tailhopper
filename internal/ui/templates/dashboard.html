@@ -186,7 +186,7 @@
 
   <!-- Add New Tailnet Card -->
   {{if not .HasUnconfiguredTailnets}}
-  {{template "add_tailnet"}}
+  {{template "add_tailnet" . }}
   {{end}}
   </div>
 </body>

@@ -102,6 +102,61 @@ h1 {
   margin: 16px 0;
 }
 
+/* Add Tailnet Card */
+.add-tailnet-card {
+  border: 1px dashed #aaa;
+  background: #fafafa;
+  transition: all 0.2s ease;
+  min-height: 200px;
+}
+
+.add-tailnet-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.add-tailnet-icon {
+  display: none;
+}
+
+.add-tailnet-title {
+  margin: 0 0 8px 0;
+  font-size: 1.15em;
+  font-weight: 600;
+  color: #333;
+}
+
+.add-tailnet-description {
+  margin: 0 0 24px 0;
+  font-size: 0.9em;
+  color: #666;
+  max-width: 300px;
+}
+
+.add-tailnet-button {
+  padding: 10px 24px;
+  background: #558B2F;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.95em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-tailnet-button:hover {
+  background: #6fa03a;
+}
+
+.add-tailnet-button:active {
+  background: #558B2F;
+}
+
 /* Tabs */
 /* Tabs - CSS-only with radio buttons */
 .tabs-container {

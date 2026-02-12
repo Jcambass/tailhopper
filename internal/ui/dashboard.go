@@ -21,6 +21,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		PACFileURL:              pac.URLPath,
 		Tailnets:                []tailnetCard{},
 		HasUnconfiguredTailnets: registry.HasUnconfiguredTailnets(),
+		HasTailnets:             false,
 	}
 
 	// Collect all tailnets from registry
@@ -33,6 +34,9 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 		}
 		return
 	}
+
+	// Mark that we have tailnets
+	data.HasTailnets = true
 
 	// Render a card for each tailnet
 	for _, tailnet := range tailnets {

@@ -66,6 +66,7 @@ type dashboardData struct {
 	PACFileURL              string
 	Tailnets                []tailnetCard
 	HasUnconfiguredTailnets bool
+	HasTailnets             bool
 }
 
 // tailnetCard contains all data for rendering a single tailnet card.
