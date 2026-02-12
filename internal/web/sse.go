@@ -128,7 +128,6 @@ func (b *SSEBroadcaster) ServeSSE(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			// Use event name instead of data for better htmx SSE extension compatibility
 			writeSSEEvent(w, event)
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()

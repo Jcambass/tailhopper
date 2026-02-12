@@ -59,6 +59,11 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 
+	// Noop endpoint for htmx triggers
+	mux.Handle("/api/noop", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
 	// Tailnet handlers - must be registered before the general /tailnet/ pattern
 	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry, sseBroadcast)))
 	mux.Handle("/tailnet/", withRequestLogging(createTailnetHandler(registry, sseBroadcast)))
@@ -84,32 +89,128 @@ func (s *Server) Start() error {
 	return s.server.ListenAndServe()
 }
 
-// createTailnetHandler returns an HTTP handler for tailnet start/stop operations.
-// Path format: /tailnet/{id}/start or /tailnet/{id}/stop
+// createTailnetHandler returns an HTTP handler for tailnet start/stop/delete operations.
+// Path format: /tailnet/{id}/start, /tailnet/{id}/stop, or /tailnet/{id} (DELETE)
 func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
+		// Extract tailnet ID from path
+		pathWithoutPrefix := strings.TrimPrefix(r.URL.Path, "/tailnet/")
+		parts := strings.Split(pathWithoutPrefix, "/")
+
+		if len(parts) == 0 || parts[0] == "" {
+			http.Error(w, "missing tailnet id", http.StatusBadRequest)
+			return
+		}
+
+		id := parts[0]
+
+		// Handle DELETE /tailnet/{id}
+		if r.Method == http.MethodDelete {
+			if len(parts) != 1 {
+				http.Error(w, "invalid path", http.StatusNotFound)
+				return
+			}
+
+			logoutSucceeded := false
+			var logoutErr error
+
+			// Try to logout and stop the tailnet
+			if tailnet, ok := registry.Get(id); ok {
+				wasStoppedInitially := tailnet.LifecycleState() == ts.LifecycleStopped
+
+				// If stopped, try to start it temporarily for logout
+				if wasStoppedInitially {
+					logger.Printf("attempting to start stopped tailnet for logout")
+					if err := tailnet.Start(r.Context()); err != nil {
+						logger.Printf("failed to start tailnet for logout: %v", err)
+						logoutErr = fmt.Errorf("could not start tailnet for logout: %v", err)
+					} else {
+						// Wait for tailnet to initialize
+						// Poll for up to 3 seconds to see if it reaches started state
+						startSuccess := false
+						for i := 0; i < 6; i++ {
+							time.Sleep(500 * time.Millisecond)
+							if tailnet.LifecycleState() == ts.LifecycleStarted {
+								startSuccess = true
+								break
+							}
+						}
+						if !startSuccess {
+							logger.Printf("tailnet did not reach started state in time")
+							logoutErr = fmt.Errorf("tailnet startup timeout")
+						}
+					}
+				}
+
+				// Try to logout if we have a running tailnet
+				if tailnet.LifecycleState() == ts.LifecycleStarted {
+					if err := tailnet.Logout(r.Context()); err != nil {
+						logger.Printf("failed to logout from tailnet: %v", err)
+						logoutErr = err
+					} else {
+						logger.Printf("successfully logged out from tailnet")
+						logoutSucceeded = true
+					}
+				}
+
+				// Stop the tailnet if it's running
+				if tailnet.LifecycleState() != ts.LifecycleStopped {
+					if err := tailnet.Stop(r.Context()); err != nil {
+						logger.Printf("failed to stop tailnet before deletion: %v", err)
+						// Continue with deletion anyway
+					}
+				}
+			}
+
+			// Always delete regardless of logout success
+			if err := registry.Delete(id); err != nil {
+				logger.Printf("failed to delete tailnet: %v", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			logger.Printf("tailnet deleted successfully (logout: %v)", logoutSucceeded)
+			sseBroadcast.NotifyGlobalChange()
+
+			// Return toast HTML using OOB swap with htmx auto-removal
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+
+			var message, toastType string
+			if logoutSucceeded {
+				message = "Tailnet deleted and logged out successfully"
+				toastType = "success"
+			} else if logoutErr != nil {
+				message = fmt.Sprintf("Tailnet deleted, but logout failed: %s", logoutErr.Error())
+				toastType = "warning"
+			} else {
+				message = "Tailnet deleted (logout skipped - tailnet was not running)"
+				toastType = "info"
+			}
+
+			toastHTML, err := ui.RenderToast(toastType, message)
+			if err != nil {
+				logger.Printf("failed to render toast: %v", err)
+				return
+			}
+			fmt.Fprint(w, toastHTML)
+			return
+		}
+
+		// Handle POST /tailnet/{id}/start or /tailnet/{id}/stop
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Extract tailnet ID and action from path: /tailnet/{id}/start or /tailnet/{id}/stop
-		pathWithoutPrefix := strings.TrimPrefix(r.URL.Path, "/tailnet/")
-		parts := strings.Split(pathWithoutPrefix, "/")
 		if len(parts) != 2 {
 			http.Error(w, "invalid path", http.StatusNotFound)
 			return
 		}
 
-		id := parts[0]
 		action := parts[1]
-
-		if id == "" {
-			http.Error(w, "missing tailnet id", http.StatusBadRequest)
-			return
-		}
 
 		if action != "start" && action != "stop" {
 			http.Error(w, "invalid action, must be 'start' or 'stop'", http.StatusBadRequest)

@@ -45,6 +45,22 @@ func renderTemplate(w http.ResponseWriter, name string, data interface{}) error 
 	return err
 }
 
+// RenderToast renders a toast notification as HTML string.
+func RenderToast(toastType, message string) (string, error) {
+	var buf strings.Builder
+	data := struct {
+		Type    string
+		Message string
+	}{
+		Type:    toastType,
+		Message: message,
+	}
+	if err := templates.ExecuteTemplate(&buf, "toast", data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
 	PACFileURL              string

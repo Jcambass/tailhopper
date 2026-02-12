@@ -215,8 +215,17 @@ func (m *Registry) Delete(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.configs[id]; !exists {
+	config, exists := m.configs[id]
+	if !exists {
 		return fmt.Errorf("tailnet not found")
+	}
+
+	// Delete the state directory from disk
+	if config.StateDir != "" {
+		if err := os.RemoveAll(config.StateDir); err != nil {
+			m.logger.Printf("failed to remove state directory %s: %v", config.StateDir, err)
+			// Continue with deletion even if directory removal fails
+		}
 	}
 
 	delete(m.configs, id)

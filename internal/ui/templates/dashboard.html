@@ -12,6 +12,11 @@
   <script src="/static/ui.js" defer></script>
 </head>
 <body hx-ext="morph,sse" sse-connect="/events">
+  <!-- Toast notification system -->
+  <div class="toast-container">
+    <div id="toast-slot"></div>
+  </div>
+  
   <div class="dashboard-header">
     <svg class="hopper-icon" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -108,31 +113,66 @@
     <div class="tailnet-header">
       {{template "tailnet_header" .}}
     </div>
+    
+    <!-- Tab Navigation -->
+    <div class="tabs" id="tabs-{{.ID}}">
+      <button class="tab-btn active" onclick="switchTab('{{.ID}}', 'tailnet')">Tailnet</button>
+      <button class="tab-btn" onclick="switchTab('{{.ID}}', 'proxy')">Proxy</button>
+      <button class="tab-btn" onclick="switchTab('{{.ID}}', 'admin')">Admin</button>
+    </div>
+    
     <div id="content-area-{{.ID}}">
-      <div id="card-body-{{.ID}}">
-        {{if eq .StateClass "connected"}}
-        <!-- connected state: show SOCKS info + machines list -->
-          {{template "socks_panel" .}}
-        <div class="tailnet-section-header">
-          <div class="tailnet-section-title">Machines</div>
+      <!-- Tailnet Tab -->
+      <div id="tab-tailnet-{{.ID}}" class="tab-content active">
+        <div id="card-body-{{.ID}}">
+          {{if eq .StateClass "connected"}}
+          <!-- connected state: show machines list -->
+          <div class="tailnet-section-header">
+            <div class="tailnet-section-title">Machines</div>
+          </div>
+          {{template "machines" .}}
+          {{else}}
+          <!-- Non-connected state: show state card -->
+          {{if eq .StateClass "disabled"}}
+            {{template "state_card_disabled" .}}
+          {{else if eq .StateClass "disabling"}}
+            {{template "state_card_disabling" .}}
+          {{else if eq .StateClass "connecting"}}
+            {{template "state_card_connecting" .}}
+          {{else if eq .StateClass "needs-login"}}
+            {{template "state_card_needs_login" .}}
+          {{else if eq .StateClass "needs-auth"}}
+            {{template "state_card_needs_auth" .}}
+          {{else if eq .StateClass "error"}}
+            {{template "state_card_error" .}}
+          {{end}}
+          {{end}}
         </div>
-        {{template "machines" .}}
+      </div>
+      
+      <!-- Proxy Tab -->
+      <div id="tab-proxy-{{.ID}}" class="tab-content">
+        {{if eq .StateClass "connected"}}
+          {{template "socks_panel" .}}
         {{else}}
-        <!-- Non-connected state: show state card -->
-        {{if eq .StateClass "disabled"}}
-          {{template "state_card_disabled" .}}
-        {{else if eq .StateClass "disabling"}}
-          {{template "state_card_disabling" .}}
-        {{else if eq .StateClass "connecting"}}
-          {{template "state_card_connecting" .}}
-        {{else if eq .StateClass "needs-login"}}
-          {{template "state_card_needs_login" .}}
-        {{else if eq .StateClass "needs-auth"}}
-          {{template "state_card_needs_auth" .}}
-        {{else if eq .StateClass "error"}}
-          {{template "state_card_error" .}}
+          <div class="state-body">
+            <p class="state-message">Proxy information available when connected</p>
+          </div>
         {{end}}
-        {{end}}
+      </div>
+      
+      <!-- Admin Tab -->
+      <div id="tab-admin-{{.ID}}" class="tab-content">
+        <div class="admin-panel">
+          <div class="admin-section">
+            <h3 class="admin-section-title">Danger Zone</h3>
+            <button 
+              class="admin-button delete-button" 
+              hx-delete="/tailnet/{{.ID}}" 
+              hx-confirm="Are you sure you want to delete this tailnet? This action cannot be undone."
+            >Delete Tailnet</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

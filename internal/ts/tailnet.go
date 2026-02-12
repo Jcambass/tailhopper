@@ -367,6 +367,31 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Logout logs out from the tailnet and cleans up local state.
+// Note: The device may remain visible in the Tailscale admin console as "disconnected"
+// until manually deleted or it expires. This is expected Tailscale behavior.
+func (t *Tailnet) Logout(ctx context.Context) error {
+	// Ensure the server is started to get a local client
+	if t.server == nil {
+		return errors.New("tailnet is not started")
+	}
+
+	lc, err := t.server.LocalClient()
+	if err != nil {
+		t.logger.Printf("failed to get LocalClient for logout: %v", err)
+		return err
+	}
+
+	t.logger.Printf("Logging out from tailnet")
+	if err := lc.Logout(ctx); err != nil {
+		t.logger.Printf("failed to logout: %v", err)
+		return err
+	}
+
+	t.logger.Printf("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
+	return nil
+}
+
 func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
 	// TODO: Do we still need this lifecycle lock for Dial?
 	// Depends on the rest of tsnets and our error handling.
