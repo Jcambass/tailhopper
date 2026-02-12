@@ -107,6 +107,12 @@ h1 {
   margin-right: 4px;
 }
 
+.machines-list-container {
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 .machine-header {
   display: flex;
   align-items: flex-start;

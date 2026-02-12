@@ -1,4 +1,5 @@
 {{define "machines"}}
+<div class="machines-list-container">
 {{if .Machines}}
 {{range .Machines}}
 {{template "machine" .}}
@@ -9,4 +10,5 @@
   <p class="empty-state-hint">Make sure other devices are connected to your Tailscale network and that your ACLs allow <code>{{.Hostname}}</code> to see them.</p>
 </div>
 {{end}}
+</div>
 {{end}}
