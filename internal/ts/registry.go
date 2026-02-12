@@ -247,12 +247,14 @@ func (m *Registry) Get(id string) (*Tailnet, bool) {
 	return t, ok
 }
 
-// TODO: Still allows adding two tailnets with same domain!
 // SetLockedDomain updates the LockedDomain for a tailnet.
 // It checks if the domain is already claimed by another tailnet to prevent duplicates.
 func (m *Registry) SetLockedDomain(id string, domain string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Track if we had unconfigured tailnets before this operation
+	hadUnconfigured := m.hasUnconfiguredTailnetsLocked()
 
 	config, ok := m.configs[id]
 	if !ok {
@@ -284,7 +286,18 @@ func (m *Registry) SetLockedDomain(id string, domain string) error {
 		tailnet.setLockedDomain(domain)
 	}
 
-	return m.saveLocked()
+	if err := m.saveLocked(); err != nil {
+		return err
+	}
+
+	// Check if the unconfigured state changed and trigger global update if needed
+	hasUnconfigured := m.hasUnconfiguredTailnetsLocked()
+	if hadUnconfigured != hasUnconfigured && m.stateChangeNotifier != nil {
+		// The configured/unconfigured state changed, notify globally
+		m.stateChangeNotifier("")
+	}
+
+	return nil
 }
 
 // HasUnconfiguredTailnets returns true if any tailnet hasn't been configured (no LockedDomain set).
@@ -292,6 +305,12 @@ func (m *Registry) HasUnconfiguredTailnets() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	return m.hasUnconfiguredTailnetsLocked()
+}
+
+// hasUnconfiguredTailnetsLocked checks for unconfigured tailnets without acquiring the lock.
+// Must be called while holding at least a read lock.
+func (m *Registry) hasUnconfiguredTailnetsLocked() bool {
 	for _, config := range m.configs {
 		if config.LockedDomain == "" {
 			return true

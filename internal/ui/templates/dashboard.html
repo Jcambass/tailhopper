@@ -115,16 +115,21 @@
     </div>
     
     <!-- Tab Navigation -->
-    <div class="tabs" id="tabs-{{.ID}}">
-      <button class="tab-btn active" onclick="switchTab('{{.ID}}', 'tailnet')">Tailnet</button>
-      <button class="tab-btn" onclick="switchTab('{{.ID}}', 'proxy')">Proxy</button>
-      <button class="tab-btn" onclick="switchTab('{{.ID}}', 'admin')">Admin</button>
-    </div>
-    
-    <div id="content-area-{{.ID}}">
-      <!-- Tailnet Tab -->
-      <div id="tab-tailnet-{{.ID}}" class="tab-content active">
-        <div id="card-body-{{.ID}}">
+    <div class="tabs-container">
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-tailnet-{{.ID}}" class="tab-input" checked>
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-proxy-{{.ID}}" class="tab-input">
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-admin-{{.ID}}" class="tab-input">
+      
+      <div class="tabs" id="tabs-{{.ID}}">
+        <label for="tab-input-tailnet-{{.ID}}" class="tab-btn">Tailnet</label>
+        <label for="tab-input-proxy-{{.ID}}" class="tab-btn">Proxy</label>
+        <label for="tab-input-admin-{{.ID}}" class="tab-btn">Admin</label>
+      </div>
+      
+      <div id="content-area-{{.ID}}">
+        <!-- Tailnet Tab -->
+        <div class="tab-content" data-tab="tailnet">
+          <div id="card-body-{{.ID}}">
           {{if eq .StateClass "connected"}}
           <!-- connected state: show machines list -->
           <div class="tailnet-section-header">
@@ -147,11 +152,11 @@
             {{template "state_card_error" .}}
           {{end}}
           {{end}}
+          </div>
         </div>
-      </div>
-      
-      <!-- Proxy Tab -->
-      <div id="tab-proxy-{{.ID}}" class="tab-content">
+        
+        <!-- Proxy Tab -->
+        <div class="tab-content" data-tab="proxy">
         {{if eq .StateClass "connected"}}
           {{template "socks_panel" .}}
         {{else}}
@@ -159,14 +164,14 @@
             <p class="state-message">Proxy information available when connected</p>
           </div>
         {{end}}
-      </div>
-      
-      <!-- Admin Tab -->
-      <div id="tab-admin-{{.ID}}" class="tab-content">
-        <div class="admin-panel">
-          <div class="admin-section">
-            <h3 class="admin-section-title">Danger Zone</h3>
-            <button 
+        </div>
+        
+        <!-- Admin Tab -->
+        <div class="tab-content" data-tab="admin">
+          <div class="admin-panel">
+            <div class="admin-section">
+              <h3 class="admin-section-title">Danger Zone</h3>
+              <button 
               class="admin-button delete-button" 
               hx-delete="/tailnet/{{.ID}}" 
               hx-confirm="Are you sure you want to delete this tailnet? This action cannot be undone."
@@ -174,6 +179,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
   </div>
   {{end}}

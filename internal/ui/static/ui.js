@@ -18,36 +18,3 @@ function copyToClipboard(elementId) {
   });
 }
 
-function switchTab(tailnetId, tabName) {
-  // Hide all tab contents for this tailnet
-  var tabContents = document.querySelectorAll('[id^="tab-"][id$="-' + tailnetId + '"]');
-  tabContents.forEach(function(content) {
-    content.classList.remove('active');
-  });
-  
-  // Remove active class from all tab buttons for this tailnet
-  var tabsContainer = document.getElementById('tabs-' + tailnetId);
-  if (tabsContainer) {
-    var tabButtons = tabsContainer.querySelectorAll('.tab-btn');
-    tabButtons.forEach(function(btn) {
-      btn.classList.remove('active');
-    });
-  }
-  
-  // Show selected tab content
-  var selectedTab = document.getElementById('tab-' + tabName + '-' + tailnetId);
-  if (selectedTab) {
-    selectedTab.classList.add('active');
-  }
-  
-  // Set active class on clicked button
-  if (tabsContainer) {
-    var clickedButton = Array.from(tabsContainer.querySelectorAll('.tab-btn')).find(function(btn) {
-      return btn.textContent.toLowerCase() === tabName;
-    });
-    if (clickedButton) {
-      clickedButton.classList.add('active');
-    }
-  }
-}
-
