@@ -131,7 +131,7 @@ type Tailnet struct {
 	lockedDomain    string
 
 	latestState    stateView
-	lifecycleMu    sync.RWMutex
+	mu             sync.RWMutex // protects lifecycleState and lifecycle operations
 	lifecycleState LifecycleState
 
 	logger *logging.Logger
@@ -139,8 +139,6 @@ type Tailnet struct {
 	server     *tsnet.Server
 	watcher    *watcher
 	socksProxy *socks.Server
-
-	lifecycleOpMu *sync.RWMutex
 
 	// terminalError stores a fatal error that prevents the tailnet from starting
 	terminalErrorMu sync.RWMutex
@@ -167,7 +165,6 @@ func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain s
 		lockedDomain:       lockedDomain,
 		terminalError:      terminalError,
 		logger:             logger,
-		lifecycleOpMu:      &sync.RWMutex{},
 		lifecycleState:     LifecycleStopped,
 		domainLocker:       domainLocker,
 		terminalErrorSaver: terminalErrorSaver,
@@ -195,8 +192,8 @@ func (t *Tailnet) LatestState() stateView {
 }
 
 func (t *Tailnet) LifecycleState() LifecycleState {
-	t.lifecycleMu.RLock()
-	defer t.lifecycleMu.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return t.lifecycleState
 }
 
@@ -223,14 +220,13 @@ func (t *Tailnet) setTerminalError(err string) {
 	}
 }
 
+// setLifecycleState updates the lifecycle state.
+// Must be called with t.mu held (exclusive lock).
 func (t *Tailnet) setLifecycleState(state LifecycleState) {
-	t.lifecycleMu.Lock()
 	if t.lifecycleState == state {
-		t.lifecycleMu.Unlock()
 		return
 	}
 	t.lifecycleState = state
-	t.lifecycleMu.Unlock()
 
 	if t.stateNotifier != nil {
 		t.stateNotifier()
@@ -269,15 +265,15 @@ func (t *Tailnet) Start(ctx context.Context) error {
 		return fmt.Errorf("tailnet has a terminal error and cannot be started: %s", termErr)
 	}
 
-	if !t.lifecycleOpMu.TryLock() {
+	if !t.mu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
-	if t.LifecycleState() == LifecycleStarting || t.LifecycleState() == LifecycleStarted {
-		t.lifecycleOpMu.Unlock()
+	if t.lifecycleState == LifecycleStarting || t.lifecycleState == LifecycleStarted {
+		t.mu.Unlock()
 		return errors.New("tailnet that is already started cannot be started again")
 	}
 	t.setLifecycleState(LifecycleStarting)
-	defer t.lifecycleOpMu.Unlock()
+	defer t.mu.Unlock()
 	defer t.setLifecycleState(LifecycleStarted)
 
 	t.logger.Printf("Starting tailnet")
@@ -324,15 +320,15 @@ func (t *Tailnet) Start(ctx context.Context) error {
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
-	if !t.lifecycleOpMu.TryLock() {
+	if !t.mu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}
-	if t.LifecycleState() == LifecycleStopping || t.LifecycleState() == LifecycleStopped {
-		t.lifecycleOpMu.Unlock()
+	if t.lifecycleState == LifecycleStopping || t.lifecycleState == LifecycleStopped {
+		t.mu.Unlock()
 		return errors.New("tailnet that is already stopped cannot be stopped again")
 	}
 	t.setLifecycleState(LifecycleStopping)
-	defer t.lifecycleOpMu.Unlock()
+	defer t.mu.Unlock()
 	defer t.setLifecycleState(LifecycleStopped)
 
 	t.logger.Printf("Stopping tailnet")
@@ -374,10 +370,10 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
 	// TODO: Do we still need this lifecycle lock for Dial?
 	// Depends on the rest of tsnets and our error handling.
-	if !t.lifecycleOpMu.TryRLock() {
+	if !t.mu.TryRLock() {
 		return nil, errors.New("tailnet is in the process of starting or stopping")
 	}
-	defer t.lifecycleOpMu.RUnlock()
+	defer t.mu.RUnlock()
 
 	return t.server.Dial(ctx, network, address)
 }

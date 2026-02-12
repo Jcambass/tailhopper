@@ -269,12 +269,12 @@ func (m *Registry) SetLockedDomain(id string, domain string) error {
 
 	config.LockedDomain = domain
 	m.configs[id] = config
-	
+
 	// Update the tailnet's locked domain as well
 	if tailnet, ok := m.tailnets[id]; ok {
 		tailnet.setLockedDomain(domain)
 	}
-	
+
 	return m.saveLocked()
 }
 
