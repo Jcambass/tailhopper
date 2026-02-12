@@ -7,7 +7,8 @@
         <button 
           type="button"
           class="login-button"
-          onclick="fetch('/tailnet/add', {method: 'POST'})"
+          hx-post="/tailnet/add"
+          hx-swap="none"
         >
           Create New Tailnet
         </button>

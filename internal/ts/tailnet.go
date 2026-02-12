@@ -142,28 +142,36 @@ type Tailnet struct {
 
 	lifecycleOpMu *sync.RWMutex
 
+	// terminalError stores a fatal error that prevents the tailnet from starting
+	terminalErrorMu sync.RWMutex
+	terminalError   string
+
 	// domainLocker is called when a domain is detected for this tailnet
 	domainLocker func(domain string) error
+	// terminalErrorSaver is called when a terminal error is set to persist it
+	terminalErrorSaver func(errMsg string) error
 	// stateNotifier is called when the state of this tailnet changes
 	stateNotifier func()
 }
 
-func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error, stateNotifier func()) *Tailnet {
+func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, terminalError string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error, terminalErrorSaver func(errMsg string) error, stateNotifier func()) *Tailnet {
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
 
 	return &Tailnet{
-		id:              id,
-		tsnetStateDir:   tsnetStateDir,
-		userSetHostname: hostname,
-		socksPort:       socksPort,
-		lockedDomain:    lockedDomain,
-		logger:          logger,
-		lifecycleOpMu:   &sync.RWMutex{},
-		lifecycleState:  LifecycleStopped,
-		domainLocker:    domainLocker,
-		stateNotifier:   stateNotifier,
+		id:                 id,
+		tsnetStateDir:      tsnetStateDir,
+		userSetHostname:    hostname,
+		socksPort:          socksPort,
+		lockedDomain:       lockedDomain,
+		terminalError:      terminalError,
+		logger:             logger,
+		lifecycleOpMu:      &sync.RWMutex{},
+		lifecycleState:     LifecycleStopped,
+		domainLocker:       domainLocker,
+		terminalErrorSaver: terminalErrorSaver,
+		stateNotifier:      stateNotifier,
 		latestState: stateView{
 			MagicDNSSuffix: lockedDomain,
 		},
@@ -192,6 +200,29 @@ func (t *Tailnet) LifecycleState() LifecycleState {
 	return t.lifecycleState
 }
 
+func (t *Tailnet) TerminalError() string {
+	t.terminalErrorMu.RLock()
+	defer t.terminalErrorMu.RUnlock()
+	return t.terminalError
+}
+
+func (t *Tailnet) setTerminalError(err string) {
+	t.terminalErrorMu.Lock()
+	t.terminalError = err
+	t.terminalErrorMu.Unlock()
+
+	// Persist the terminal error
+	if t.terminalErrorSaver != nil {
+		if saveErr := t.terminalErrorSaver(err); saveErr != nil {
+			t.logger.Printf("failed to save terminal error: %v", saveErr)
+		}
+	}
+
+	if t.stateNotifier != nil {
+		t.stateNotifier()
+	}
+}
+
 func (t *Tailnet) setLifecycleState(state LifecycleState) {
 	t.lifecycleMu.Lock()
 	if t.lifecycleState == state {
@@ -214,6 +245,15 @@ func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
 	if oldSuffix == "" && t.latestState.MagicDNSSuffix != "" && t.domainLocker != nil {
 		if err := t.domainLocker(t.latestState.MagicDNSSuffix); err != nil {
 			t.logger.Printf("failed to lock domain %s: %v", t.latestState.MagicDNSSuffix, err)
+			// This is a terminal error - the tailnet is trying to use a domain that's already in use
+			t.setTerminalError(err.Error())
+			// Stop the tailnet since it cannot proceed
+			go func() {
+				if err := t.Stop(context.Background()); err != nil {
+					t.logger.Printf("failed to stop tailnet after domain lock failure: %v", err)
+				}
+			}()
+			return
 		}
 	}
 
@@ -224,6 +264,11 @@ func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
+	// Check for terminal errors first
+	if termErr := t.TerminalError(); termErr != "" {
+		return fmt.Errorf("tailnet has a terminal error and cannot be started: %s", termErr)
+	}
+
 	if !t.lifecycleOpMu.TryLock() {
 		return errors.New("tailnet is in the process of starting or stopping")
 	}

@@ -55,6 +55,14 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 			LifecycleState: string(tailnet.LifecycleState()),
 		}
 
+		// Check for terminal errors first
+		if termErr := tailnet.TerminalError(); termErr != "" {
+			card.StateClass = "error"
+			card.ErrorMsg = termErr
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		}
+
 		switch card.LifecycleState {
 		case string(ts.LifecycleStarting):
 			card.StateClass = "connecting"

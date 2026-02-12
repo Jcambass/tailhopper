@@ -26,6 +26,8 @@ type Config struct {
 	// LockedDomain is the domain we expect this tailnet to be logged into.
 	// If empty, it will be set upon first successful connection.
 	LockedDomain string `json:"locked_domain,omitempty"`
+	// TerminalError stores a fatal error that prevents the tailnet from starting.
+	TerminalError string `json:"terminal_error,omitempty"`
 }
 
 type Registry struct {
@@ -86,8 +88,9 @@ func (m *Registry) Load() error {
 		domainLocker := func(domain string) error {
 			return m.SetLockedDomain(c.ID, domain)
 		}
+		terminalErrorSaver := m.createTerminalErrorSaver(c.ID)
 		stateNotifier := m.createStateNotifier(c.ID)
-		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, stateNotifier)
+		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.LockedDomain, c.TerminalError, c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, terminalErrorSaver, stateNotifier)
 		m.tailnets[c.ID] = tailnet
 		// Update nextID based on loaded IDs
 		if id, err := strconv.Atoi(c.ID); err == nil && id >= m.nextID {
@@ -188,8 +191,9 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 	domainLocker := func(domain string) error {
 		return m.SetLockedDomain(c.ID, domain)
 	}
+	terminalErrorSaver := m.createTerminalErrorSaver(c.ID)
 	stateNotifier := m.createStateNotifier(c.ID)
-	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, stateNotifier)
+	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m.logger.With("tailnet", c.ID), domainLocker, terminalErrorSaver, stateNotifier)
 	m.tailnets[c.ID] = tailnet
 
 	if err := m.saveLocked(); err != nil {
@@ -299,6 +303,29 @@ func (m *Registry) createStateNotifier(tailnetID string) func() {
 			m.stateChangeNotifier(tailnetID)
 		}
 	}
+}
+
+// createTerminalErrorSaver creates a function to save terminal errors for a specific tailnet.
+func (m *Registry) createTerminalErrorSaver(tailnetID string) func(error string) error {
+	return func(errMsg string) error {
+		return m.SetTerminalError(tailnetID, errMsg)
+	}
+}
+
+// SetTerminalError updates the TerminalError for a tailnet and persists it.
+func (m *Registry) SetTerminalError(id string, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config, ok := m.configs[id]
+	if !ok {
+		return fmt.Errorf("tailnet not found")
+	}
+
+	config.TerminalError = errMsg
+	m.configs[id] = config
+
+	return m.saveLocked()
 }
 
 // findAvailablePort finds an available port by temporarily binding to 127.0.0.1:0.

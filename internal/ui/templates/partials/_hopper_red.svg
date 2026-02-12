@@ -1,5 +1,5 @@
 {{define "_hopper_red"}}
-<svg class="hopper-small" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+<svg class="hopper-small error" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="bodyGradRed" x1="0%" y1="0%" x2="0%" y2="100%">
         <stop offset="0%" style="stop-color:#EF5350;stop-opacity:1" />
@@ -15,7 +15,7 @@
     <circle cx="60" cy="20" r="5" fill="#fff" />
     <circle cx="60" cy="20" r="3" fill="#B71C1C" />
     <circle cx="61" cy="19" r="1" fill="#fff" />
-    <path d="M 45 30 Q 50 34 55 30" stroke="#B71C1C" stroke-width="1.5" fill="none" stroke-linecap="round" />
+    <path d="M 45 32 Q 50 28 55 32" stroke="#B71C1C" stroke-width="1.5" fill="none" stroke-linecap="round" />
     <path d="M 38 10 Q 28 5 25 2" stroke="#B71C1C" stroke-width="2.5" fill="none" stroke-linecap="round" />
     <circle cx="25" cy="2" r="2" fill="#B71C1C" />
     <path d="M 62 10 Q 72 5 75 2" stroke="#B71C1C" stroke-width="2.5" fill="none" stroke-linecap="round" />

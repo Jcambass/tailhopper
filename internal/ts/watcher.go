@@ -47,10 +47,8 @@ func (w *watcher) Start() {
 
 		// TODO: Use NotifyWatchEngineUpdates?
 		// TODO: Use NotifyInitialHealthState?
-		// Note: We don't use NotifyInitialState because Start() manually sets the initial state,
-		// and requesting initial state can cause a race condition where we get the old state
-		// before tsnet has transitioned, causing UI flicker.
-		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialNetMap)
+		// Request both initial state and netmap to ensure we get state transitions immediately
+		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
 			w.logger.Printf("failed to watch IPN bus: %v", err)
 			return
@@ -80,6 +78,7 @@ func (w *watcher) Stop() {
 		// TODO: Are all these needed?
 		w.logger.Printf("Canceling IPN watcher ctx")
 		w.cancel()
+		w.cancel = nil
 		w.logger.Printf("Closing IPN watcher")
 		w.ipnBusWatcher.Close()
 		w.ipnBusWatcher = nil

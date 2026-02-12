@@ -61,9 +61,10 @@ type tailnetCard struct {
 	SocksHost      string
 	SocksPort      string
 	Machines       []machineView
-	StateClass     string // "connected", "needs-login", "connecting"
+	StateClass     string // "connected", "needs-login", "connecting", "error"
 	AuthURL        string
 	LifecycleState string
+	ErrorMsg       string
 }
 
 // machineView represents a machine for display.
