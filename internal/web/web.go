@@ -116,59 +116,32 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 				return
 			}
 
-			logoutSucceeded := false
 			var logoutErr error
 
-			// TODO: BROKEN This does not handle starting and stopping states.
-			// It also does not handle all other sub states we now have.
-			// Let's consider adding something to the states themsels to handle this logic!
-			// Ideally we add a new state for this situation that startups temporarly and logsout and than transitions to stopped again.
-
 			// Try to logout and stop the tailnet
-			if tailnet, ok := registry.Get(id); ok {
-				// If stopped, try to start it temporarily for logout
-				if tailnet.StateName() == ts.StoppedStateName {
-					logger.Printf("attempting to start stopped tailnet for logout")
-					if err := tailnet.Start(r.Context()); err != nil {
-						logger.Printf("failed to start tailnet for logout: %v", err)
-						logoutErr = fmt.Errorf("could not start tailnet for logout: %v", err)
-					} else {
-						// Wait for tailnet to initialize
-						// Poll for up to 3 seconds to see if it reaches started state
-						startSuccess := false
-						for i := 0; i < 6; i++ {
-							time.Sleep(500 * time.Millisecond)
-							if tailnet.StateName() == ts.StartedStateName {
-								startSuccess = true
-								break
-							}
-						}
-						if !startSuccess {
-							logger.Printf("tailnet did not reach started state in time")
-							logoutErr = fmt.Errorf("tailnet startup timeout")
-						}
-					}
-				}
 
-				// Try to logout if we have a running tailnet
-				if tailnet.StateName() == ts.StartedStateName {
-					if err := tailnet.Logout(r.Context()); err != nil {
-						logger.Printf("failed to logout from tailnet: %v", err)
-						logoutErr = err
-					} else {
-						logger.Printf("successfully logged out from tailnet")
-						logoutSucceeded = true
-					}
-				}
+			tailnet, ok := registry.Get(id)
 
-				// Stop the tailnet if it's running
-				if tailnet.StateName() != ts.StoppedStateName {
-					if err := tailnet.Stop(r.Context()); err != nil {
-						logger.Printf("failed to stop tailnet before deletion: %v", err)
-						// Continue with deletion anyway
-					}
-				}
+			if !ok {
+				logger.Printf("tailnet not found for id %d: %v", id, err)
+				http.Error(w, "tailnet not found", http.StatusNotFound)
+				return
 			}
+
+			// Give logout a deadline to prevent hanging the request indefinitely.
+			// Note that logout might internally starts the tsnet server if it's not already started, so we need to give it enough time to do that and complete the logout process.
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			err := tailnet.Logout(ctx)
+			if err != nil {
+				logger.Printf("logout failed for tailnet %d: %v", id, err)
+				logoutErr = err
+			} else {
+				logger.Printf("logout succeeded for tailnet %d", id)
+			}
+
+			// If logout failed, we log it but still continue to delete the tailnet locally.
 
 			// Always delete regardless of logout success
 			if err := registry.Delete(id); err != nil {
@@ -177,7 +150,7 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 				return
 			}
 
-			logger.Printf("tailnet deleted successfully (logout: %v)", logoutSucceeded)
+			logger.Printf("tailnet deleted successfully")
 			broadcaster.BroadcastGlobalChange()
 
 			// Return toast HTML using OOB swap with htmx auto-removal
@@ -185,15 +158,12 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 			w.WriteHeader(http.StatusOK)
 
 			var message, toastType string
-			if logoutSucceeded {
+			if logoutErr == nil {
 				message = "Tailnet deleted and logged out successfully"
 				toastType = "success"
-			} else if logoutErr != nil {
+			} else {
 				message = fmt.Sprintf("Tailnet deleted, but logout failed: %s", logoutErr.Error())
 				toastType = "warning"
-			} else {
-				message = "Tailnet deleted (logout skipped - tailnet was not running)"
-				toastType = "info"
 			}
 
 			toastHTML, err := ui.RenderToast(toastType, message)

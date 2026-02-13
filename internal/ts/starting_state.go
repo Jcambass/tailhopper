@@ -21,7 +21,7 @@ func (s *StartingState) Start(ctx context.Context) error {
 }
 
 func (s *StartingState) Stop(ctx context.Context) error {
-	return errors.New("unable to stop: tailnet is already starting")
+	return s.tailnet.stop(ctx)
 }
 
 func (s *StartingState) Logout(ctx context.Context) error {

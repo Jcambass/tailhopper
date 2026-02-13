@@ -18,6 +18,7 @@ const (
 	StartingStateName         StateName = "StartingState"
 	StoppedStateName          StateName = "StoppedState"
 	StoppingStateName         StateName = "StoppingState"
+	LoggingOutStateName       StateName = "LoggingOutState"
 )
 
 type State interface {

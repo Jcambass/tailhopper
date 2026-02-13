@@ -21,11 +21,13 @@ func (s *HasTerminalErrorState) Start(ctx context.Context) error {
 }
 
 // TODO: Allow or not?
+// Currently unused but technically makes sense.
 func (s *HasTerminalErrorState) Stop(ctx context.Context) error {
 	return s.tailnet.stop(ctx)
 }
 
-// TODO: Allow or not?
+// Allow logout - for now the only terminal error happens when logged in
+// But since logout is best effort anyway, we're probably ok in the future as well.
 func (s *HasTerminalErrorState) Logout(ctx context.Context) error {
 	return s.tailnet.logout(ctx)
 }

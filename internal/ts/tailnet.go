@@ -38,6 +38,7 @@ type Tailnet struct {
 	starting         State
 	stopped          State
 	stopping         State
+	loggingOut       State
 
 	logger *logging.Logger
 
@@ -73,6 +74,8 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 	t.started = &StartedState{tailnet: t}
 	t.starting = &StartingState{tailnet: t}
 	t.stopped = &StoppedState{tailnet: t}
+	t.stopping = &StoppingState{tailnet: t}
+	t.loggingOut = &LoggingOutState{tailnet: t}
 
 	if terminalError != "" {
 		t.setState(t.hasTerminalError)
@@ -92,6 +95,8 @@ func (t *Tailnet) setState(state State) {
 	t.currentState = state
 	t.mu.Unlock()
 
+	t.logger.Printf("set state to %s", string(state.Name()))
+
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
 	if t.broadcast != nil {
 		t.broadcast()
@@ -100,6 +105,7 @@ func (t *Tailnet) setState(state State) {
 
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
+	t.logger.Printf("set state to %s", string(state.Name()))
 }
 
 func (t *Tailnet) ID() int {
@@ -111,11 +117,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 
 	t.logger.Printf("Starting tailnet")
 
-	t.server = &tsnet.Server{
-		Dir:      t.tsnetStateDir,
-		Hostname: t.userSetHostname,
-	}
-
+	t.logger.Printf("Starting SOCKS5 proxy on port %d", t.socksPort)
 	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
 		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
@@ -127,17 +129,19 @@ func (t *Tailnet) start(ctx context.Context) error {
 	t.socksProxy = socksProxy
 	t.socksProxy.Start()
 
-	// start IPN watcher to observe state changes
-	t.watcher = newWatcher(t)
-	t.watcher.Start()
-
 	// Asynchronously start the server
+	t.logger.Printf("Starting tsnet server")
+
+	t.server = &tsnet.Server{
+		Dir:      t.tsnetStateDir,
+		Hostname: t.userSetHostname,
+	}
+
 	err = t.server.Start()
 	if err != nil {
 		t.logger.Printf("failed to start tsnet server: %v", err)
-		// If we fail to start the server, we should stop the watcher and socks proxy that we started since they won't be functional without the server.
-		t.watcher.Stop()
-		t.watcher = nil
+		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
+
 		err := t.socksProxy.Close()
 		if err != nil {
 			t.logger.Printf("failed to close SOCKS5 proxy after server start failure: %v", err)
@@ -147,6 +151,11 @@ func (t *Tailnet) start(ctx context.Context) error {
 		t.setState(t.stopped)
 		return err
 	}
+
+	// start IPN watcher to observe state changes
+	t.logger.Printf("Starting IPN watcher")
+	t.watcher = newWatcher(t)
+	t.watcher.Start()
 
 	t.setState(t.started)
 	return nil
@@ -187,10 +196,11 @@ func (t *Tailnet) stop(ctx context.Context) error {
 			t.logger.Printf("failed to close tsnet server: %v", err)
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
+			t.setState(t.stopped)
 			return err
 		}
-		t.server = nil
 		t.logger.Printf("tsnet server stopped")
+		t.server = nil
 	}
 
 	t.logger.Printf("Tailnet stopped successfully")
@@ -203,7 +213,24 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	return t.currentState.Stop(ctx)
 }
 
+// logout logs the machine out of the tailnet. This is different from stop, which just stops the local tsnet server but leaves the machine authenticated with the tailnet.
+// After logout, the machine will no longer be able to connect to the tailnet until it's logged in again.
+// logout will start the server if it's not already started, then log out from the tailnet.
+// During all of this we stay in the LoggingOut state.
+// No matter what happens, we transition to the Stopped state at the end, since if logout is successful we're logged out and if logout fails we're in a bad state and stopping is the safest option.
 func (t *Tailnet) logout(ctx context.Context) error {
+	// TODO: This and start/stop need some concurrency protection.
+	// State changes themself are guarded but I think we can still mess up and it's hard to see what's safe and what is not!
+	t.setState(t.loggingOut)
+	defer t.setState(t.stopped)
+
+	if t.server == nil {
+		t.server = &tsnet.Server{
+			Dir:      t.tsnetStateDir,
+			Hostname: t.userSetHostname,
+		}
+	}
+
 	lc, err := t.server.LocalClient()
 	if err != nil {
 		t.logger.Printf("failed to get LocalClient for logout: %v", err)
@@ -211,6 +238,8 @@ func (t *Tailnet) logout(ctx context.Context) error {
 	}
 
 	t.logger.Printf("Logging out from tailnet")
+
+	// TODO: Does logout auto close the server?
 	if err := lc.Logout(ctx); err != nil {
 		t.logger.Printf("failed to logout: %v", err)
 		return err

@@ -51,7 +51,6 @@ func (w *watcher) Start() {
 
 		// TODO: Use NotifyWatchEngineUpdates?
 		// TODO: Use NotifyInitialHealthState?
-		// Request both initial state and netmap to ensure we get state transitions immediately
 		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
 			w.logger.Printf("failed to watch IPN bus: %v", err)

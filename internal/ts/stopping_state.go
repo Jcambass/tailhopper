@@ -17,7 +17,7 @@ func (s *StoppingState) Name() StateName {
 }
 
 func (s *StoppingState) Start(ctx context.Context) error {
-	return s.tailnet.start(ctx)
+	return errors.New("unable to start: tailnet is stopping")
 }
 
 func (s *StoppingState) Stop(ctx context.Context) error {

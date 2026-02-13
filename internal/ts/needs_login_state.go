@@ -24,8 +24,9 @@ func (s *NeedsLoginState) Stop(ctx context.Context) error {
 	return s.tailnet.stop(ctx)
 }
 
+// Logout is a no-op in the needs login state since the user is already effectively logged out.
 func (s *NeedsLoginState) Logout(ctx context.Context) error {
-	return errors.New("unable to logout: tailnet needs login")
+	return nil
 }
 
 func (s *NeedsLoginState) Dial(ctx context.Context, network, addr string) (net.Conn, error) {

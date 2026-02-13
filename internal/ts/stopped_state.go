@@ -25,7 +25,7 @@ func (s *StoppedState) Stop(ctx context.Context) error {
 }
 
 func (s *StoppedState) Logout(ctx context.Context) error {
-	return errors.New("unable to logout: tailnet is stopped")
+	return s.tailnet.logout(ctx)
 }
 
 func (s *StoppedState) Dial(ctx context.Context, network, addr string) (net.Conn, error) {

@@ -24,7 +24,7 @@ func (s *StartedState) Stop(ctx context.Context) error {
 	return s.tailnet.stop(ctx)
 }
 
-// TODO: Allow or not?
+// We might not be properly logged in yet but the tsnet server is up and calls to its Logout method will succeed.
 func (s *StartedState) Logout(ctx context.Context) error {
 	return s.tailnet.logout(ctx)
 }
