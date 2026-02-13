@@ -1,4 +1,4 @@
-package ts
+package registry
 
 import (
 	"encoding/json"
@@ -11,24 +11,9 @@ import (
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/sse"
+	"github.com/jcambass/tailhopper/internal/ts"
 	"tailscale.com/util/dnsname"
 )
-
-// MagicDNSSuffixRegistry defines the interface for claiming MagicDNS suffixes for tailnets.
-// This helps to ensure that no two tailnets claim the same MagicDNS suffix.
-type MagicDNSSuffixRegistry interface {
-	// Claim attempts to claim the given MagicDNS suffix for the specified tailnet ID.
-	// It returns an error if the suffix is already claimed by another tailnet or if there is a mismatch with an existing claim.
-	Claim(tailnetID int, suffix string) error
-}
-
-type AlreadyClaimedError struct {
-	Suffix string
-}
-
-func (e *AlreadyClaimedError) Error() string {
-	return fmt.Sprintf("magic DNS suffix '%s' is already claimed by another tailnet", e.Suffix)
-}
 
 type PersistedTailnet struct {
 	// ID is a unique stable identifier for the tailnet.
@@ -47,16 +32,15 @@ type PersistedTailnet struct {
 }
 
 type RegisteredTailnet struct {
-	*Tailnet
+	*ts.Tailnet
 	// config is the persisted configuration for this tailnet.
 	config PersistedTailnet
 }
 
 type Registry struct {
-	path   string
-	mu     sync.RWMutex
-	nextID int
-
+	path        string
+	mu          sync.RWMutex
+	nextID      int
 	tailnets    map[int]*RegisteredTailnet
 	broadcaster sse.Broadcaster
 }
@@ -68,6 +52,7 @@ func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
 		tailnets:    make(map[int]*RegisteredTailnet),
 		broadcaster: broadcaster,
 	}
+
 	if err := m.Load(); err != nil {
 		if os.IsNotExist(err) {
 			// It's okay if the file doesn't exist yet
@@ -75,6 +60,7 @@ func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
 		}
 		return nil, err
 	}
+
 	return m, nil
 }
 
@@ -85,27 +71,28 @@ func (m *Registry) Claim(tailnetID int, suffix string) error {
 	// Check if the suffix is already claimed by another tailnet
 	for _, tailnet := range m.tailnets {
 		if tailnet.config.ClaimedMagicDNSSuffix == suffix {
-			return &AlreadyClaimedError{Suffix: suffix}
+			return &ts.AlreadyClaimedError{Suffix: suffix}
 		}
 	}
 
-	// Update the config for this tailnet
 	tailnet, ok := m.tailnets[tailnetID]
 	if !ok {
 		return fmt.Errorf("tailnet not found")
 	}
-	tailnet.config.ClaimedMagicDNSSuffix = suffix
 
-	// Setting the claimed suffix on the tailnet instance itself is done in the caller after a successful claim.
-	// Notifying about the state change for that tailnet specifically is also done in the caller.
+	// Update the config for this tailnet
+	tailnet.config.ClaimedMagicDNSSuffix = suffix
 
 	// Persist the change to disk
 	if err := m.saveLocked(); err != nil {
 		return err
 	}
 
-	// Notify globally since per definition, we now have no more unconfigured tailnets
+	// Setting the claimed suffix on the tailnet instance itself is done in the caller after a successful claim.
+	// Notifying about the state change for that tailnet specifically is also done in the caller.
+
 	if m.broadcaster != nil {
+		// Notify globally since per definition, we now have no more unconfigured tailnets
 		m.broadcaster.BroadcastGlobalChange()
 	}
 
@@ -130,6 +117,7 @@ func (m *Registry) Load() error {
 
 	m.tailnets = make(map[int]*RegisteredTailnet)
 	m.nextID = 1
+
 	for _, c := range list {
 		broadcast := func() {
 			// Notify about the change for this tailnet
@@ -137,11 +125,13 @@ func (m *Registry) Load() error {
 				m.broadcaster.BroadcastTailnetChange(c.ID)
 			}
 		}
-		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.SocksPort, m, broadcast)
+
+		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.SocksPort, m, broadcast)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
 		}
+
 		// Update nextID based on loaded IDs
 		if c.ID >= m.nextID {
 			m.nextID = c.ID + 1
@@ -174,15 +164,16 @@ func (m *Registry) saveLocked() error {
 }
 
 // List returns all tailnets in the registry, sorted by their numeric ID.
-func (m *Registry) List() []*Tailnet {
+func (m *Registry) List() []*ts.Tailnet {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// Return tailnets in sorted order by numeric ID for consistency.
-	var tailnets []*Tailnet
+
+	var tailnets []*ts.Tailnet
 	for _, tailnet := range m.tailnets {
 		tailnets = append(tailnets, tailnet.Tailnet)
 	}
 
+	// Return tailnets in sorted order by numeric ID for consistency.
 	sort.Slice(tailnets, func(i, j int) bool {
 		return tailnets[i].ID() < tailnets[j].ID()
 	})
@@ -193,12 +184,13 @@ func (m *Registry) List() []*Tailnet {
 // Add creates a new unconfigured tailnet with the given hostname and returns it.
 // If hostname is empty, a default one will be generated based on the machine's hostname.
 // Example: if the machine's hostname is "laptop", the generated hostname will be "laptop-tailhopper".
-func (m *Registry) Add(hostname string) (*Tailnet, error) {
+func (m *Registry) Add(hostname string) (*ts.Tailnet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	id := m.nextID
 	m.nextID++
+
 	stateDir := filepath.Join(filepath.Dir(m.path), "tailnets", fmt.Sprintf("%d", id))
 
 	// Generate hostname if not provided
@@ -231,14 +223,15 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 		}
 	}
 
-	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m, broadcast)
+	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m, broadcast)
+
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,
 		config:  c,
 	}
 
+	// Rollback on save failure
 	if err := m.saveLocked(); err != nil {
-		// Rollback on save failure
 		delete(m.tailnets, c.ID)
 		return nil, err
 	}
@@ -261,8 +254,8 @@ func (m *Registry) Delete(id int) error {
 		return fmt.Errorf("tailnet not found")
 	}
 
-	// Delete the state directory from disk
 	if tailnet.config.StateDir != "" {
+		// Delete the state directory from disk
 		if err := os.RemoveAll(tailnet.config.StateDir); err != nil {
 			slog.Warn("failed to remove state directory", "component", "registry", "dir", tailnet.config.StateDir, "error", err)
 			// Continue with deletion even if directory removal fails
@@ -271,20 +264,28 @@ func (m *Registry) Delete(id int) error {
 
 	delete(m.tailnets, id)
 
-	err := m.saveLocked()
-	if err == nil && m.broadcaster != nil {
-		// Notify about global change (tailnet deleted)
+	if err := m.saveLocked(); err != nil {
+		// If save fails, we're in an inconsistent state in memory vs disk.
+		// But the object is gone from memory. This is a best effort.
+	}
+
+	// Notify about global change (tailnet deleted)
+	if m.broadcaster != nil {
 		m.broadcaster.BroadcastGlobalChange()
 	}
 
-	return err
+	return nil
 }
 
 // Get retrieves a tailnet by ID. The boolean indicates if the tailnet was found.
-func (m *Registry) Get(id int) (*Tailnet, bool) {
+func (m *Registry) Get(id int) (*ts.Tailnet, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	t, ok := m.tailnets[id]
+	if !ok {
+		return nil, false
+	}
 	return t.Tailnet, ok
 }
 
@@ -294,7 +295,7 @@ func (m *Registry) HasUnconfiguredTailnets() bool {
 	defer m.mu.RUnlock()
 
 	for _, tailnet := range m.tailnets {
-		if tailnet.claimedMagicDNSSuffix == "" {
+		if tailnet.config.ClaimedMagicDNSSuffix == "" {
 			return true
 		}
 	}
@@ -308,6 +309,7 @@ func findAvailablePort() (int, error) {
 		return 0, err
 	}
 	defer listener.Close()
+
 	addr := listener.Addr().(*net.TCPAddr)
 	return addr.Port, nil
 }

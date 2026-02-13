@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
@@ -50,10 +51,10 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 	return sb.String(), suffixes
 }
 
-func Handler(registry *ts.Registry) http.HandlerFunc {
+func Handler(reg *registry.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		pac, suffixes := buildPACForTailnets(registry.List())
+		pac, suffixes := buildPACForTailnets(reg.List())
 		slog.InfoContext(ctx, "Serving PAC file", "component", "pac", "suffixes", strings.Join(suffixes, ", "))
 		writePAC(w, pac)
 	}

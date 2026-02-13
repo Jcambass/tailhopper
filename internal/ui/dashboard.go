@@ -8,23 +8,24 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/internal/pac"
+	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registry) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Registry) {
 	ctx := r.Context()
 
 	// Base data structure
 	data := dashboardData{
 		PACFileURL:              pac.URLPath,
 		Tailnets:                []tailnetCard{},
-		HasUnconfiguredTailnets: registry.HasUnconfiguredTailnets(),
+		HasUnconfiguredTailnets: reg.HasUnconfiguredTailnets(),
 		HasTailnets:             false,
 	}
 
 	// Collect all tailnets from registry
-	tailnets := registry.List()
+	tailnets := reg.List()
 	if len(tailnets) == 0 {
 		// No tailnets - render empty dashboard
 		if err := renderTemplate(w, "dashboard.html", data); err != nil {

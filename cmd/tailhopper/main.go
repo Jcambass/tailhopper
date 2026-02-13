@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/jcambass/tailhopper/internal/logging"
+	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
-	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/web"
 	"github.com/lmittmann/tint"
 )
@@ -44,7 +44,7 @@ func main() {
 
 	seeBroadcaster := sse.NewSSEBroadcaster()
 
-	registry, err := ts.NewRegistry("./tailhopper.json", seeBroadcaster)
+	reg, err := registry.NewRegistry("./tailhopper.json", seeBroadcaster)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to initialize registry", "error", err)
 		os.Exit(1)
@@ -58,7 +58,7 @@ func main() {
 	dashboardAddr := "127.0.0.1:" + dashboardPort
 
 	// Create dashboard server
-	dashboardSrv := web.NewServer(dashboardAddr, registry, seeBroadcaster)
+	dashboardSrv := web.NewServer(dashboardAddr, reg, seeBroadcaster)
 
 	if err := dashboardSrv.Start(); err != nil {
 		slog.ErrorContext(ctx, "dashboard server error", "error", err)
