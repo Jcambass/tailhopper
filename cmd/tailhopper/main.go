@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"os"
 
 	"github.com/jcambass/tailhopper/internal/logging"
@@ -22,17 +23,31 @@ import (
 //     or configure SOCKS5 proxy to use localhost:1080.
 //  7. View status at http://localhost:8888
 func main() {
-	defer logging.CatchPanic(nil)
+	// Set up context-aware logging
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		level = slog.LevelInfo
+	}
 
-	baseLogger := logging.New(log.Default(), map[string]any{})
-	logging.SetDefault(baseLogger)
-	logger := baseLogger.With("component", "cmd")
+	opts := &slog.HandlerOptions{
+		Level: level,
+	}
 
-	seeBroadcaster := sse.NewSSEBroadcaster(logger)
+	// We use NewTextHandler to avoid a deadlock loop with the default handler
+	// which would otherwise route back to the log package when SetDefault is called.
+	handler := logging.NewContextHandler(slog.NewTextHandler(os.Stderr, opts))
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
 
-	registry, err := ts.NewRegistry("./tailhopper.json", baseLogger, seeBroadcaster)
+	ctx := context.Background()
+	defer logging.CatchPanic(ctx)
+
+	seeBroadcaster := sse.NewSSEBroadcaster()
+
+	registry, err := ts.NewRegistry("./tailhopper.json", seeBroadcaster)
 	if err != nil {
-		logger.Fatalf("failed to initialize registry: %v", err)
+		slog.ErrorContext(ctx, "failed to initialize registry", "error", err)
+		os.Exit(1)
 	}
 
 	// Dashboard server on separate port
@@ -46,6 +61,7 @@ func main() {
 	dashboardSrv := web.NewServer(dashboardAddr, registry, seeBroadcaster)
 
 	if err := dashboardSrv.Start(); err != nil {
-		logger.Fatalf("dashboard server error: %v", err)
+		slog.ErrorContext(ctx, "dashboard server error", "error", err)
+		os.Exit(1)
 	}
 }

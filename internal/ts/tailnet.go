@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
+	"strings"
 	"sync"
 
-	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/socks"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
@@ -40,21 +41,18 @@ type Tailnet struct {
 	stopping         State
 	loggingOut       State
 
-	logger *logging.Logger
-
 	server     *tsnet.Server
 	watcher    *watcher
 	socksProxy *socks.Server
 
 	magicDNSSuffixRegistry MagicDNSSuffixRegistry
 	broadcast              func()
+
+	logMu  sync.RWMutex
+	logger *slog.Logger
 }
 
-func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, socksPort int, logger *logging.Logger, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func()) *Tailnet {
-	if logger == nil {
-		logger = logging.Default().With("component", "tailnet")
-	}
-
+func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func()) *Tailnet {
 	t := &Tailnet{
 		id:                     id,
 		tsnetStateDir:          tsnetStateDir,
@@ -62,9 +60,13 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 		socksPort:              socksPort,
 		claimedMagicDNSSuffix:  claimedMagicDNSSuffix,
 		terminalError:          terminalError,
-		logger:                 logger,
 		magicDNSSuffixRegistry: magicDNSSuffixRegistry,
 		broadcast:              broadcast,
+		logger:                 slog.Default().With("component", "tailnet", "tailnet_id", id),
+	}
+
+	if claimedMagicDNSSuffix != "" {
+		t.logger = t.logger.With("magic_dns_suffix", claimedMagicDNSSuffix)
 	}
 
 	t.connected = &ConnectedState{tailnet: t}
@@ -177,7 +179,7 @@ func (t *Tailnet) setState(state State) {
 	t.currentState = state
 	t.mu.Unlock()
 
-	t.logger.Printf("set state to %s", string(state.Name()))
+	t.log().Info("set state", "state", string(state.Name()))
 
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
 	if t.broadcast != nil {
@@ -187,18 +189,24 @@ func (t *Tailnet) setState(state State) {
 
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
-	t.logger.Printf("set state to %s", string(state.Name()))
+	t.log().Info("set state", "state", string(state.Name()))
+}
+
+func (t *Tailnet) log() *slog.Logger {
+	t.logMu.RLock()
+	defer t.logMu.RUnlock()
+	return t.logger
 }
 
 func (t *Tailnet) start(ctx context.Context) error {
 	t.setState(t.starting)
 
-	t.logger.Printf("Starting tailnet")
+	t.log().Info("Starting tailnet")
 
-	t.logger.Printf("Starting SOCKS5 proxy on port %d", t.socksPort)
+	t.log().Info("Starting SOCKS5 proxy", "port", t.socksPort)
 	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
-		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
+		t.log().Error("failed to start SOCKS5 proxy", "error", err)
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
 		t.setState(t.stopped)
@@ -208,21 +216,23 @@ func (t *Tailnet) start(ctx context.Context) error {
 	t.socksProxy.Start()
 
 	// Asynchronously start the server
-	t.logger.Printf("Starting tsnet server")
+	t.log().Info("Starting tsnet server")
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
 		Hostname: t.userSetHostname,
+		UserLogf: t.tsnetLogf(slog.LevelInfo),
+		Logf:     t.tsnetLogf(slog.LevelDebug),
 	}
 
 	err = t.server.Start()
 	if err != nil {
-		t.logger.Printf("failed to start tsnet server: %v", err)
+		t.log().Error("failed to start tsnet server", "error", err)
 		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
 
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.logger.Printf("failed to close SOCKS5 proxy after server start failure: %v", err)
+			t.log().Error("failed to close SOCKS5 proxy after server start failure", "error", err)
 		}
 		t.socksProxy = nil
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
@@ -231,7 +241,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 	}
 
 	// start IPN watcher to observe state changes
-	t.logger.Printf("Starting IPN watcher")
+	t.log().Info("Starting IPN watcher")
 	t.watcher = newWatcher(t)
 	t.watcher.Start()
 
@@ -242,42 +252,42 @@ func (t *Tailnet) start(ctx context.Context) error {
 func (t *Tailnet) stop(ctx context.Context) error {
 	t.setState(t.stopping)
 
-	t.logger.Printf("Stopping tailnet")
+	t.log().Info("Stopping tailnet")
 
 	if t.socksProxy != nil {
-		t.logger.Printf("Stopping SOCKS5 proxy")
+		t.log().Info("Stopping SOCKS5 proxy")
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.logger.Printf("failed to close SOCKS5 proxy: %v", err)
+			t.log().Error("failed to close SOCKS5 proxy", "error", err)
 			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
 			return err
 		}
 		t.socksProxy = nil
-		t.logger.Printf("SOCKS5 proxy stopped")
+		t.log().Info("SOCKS5 proxy stopped")
 	}
 
 	if t.watcher != nil {
-		t.logger.Printf("Stopping watcher")
+		t.log().Info("Stopping watcher")
 		t.watcher.Stop()
 		t.watcher = nil
-		t.logger.Printf("Watcher stopped")
+		t.log().Info("Watcher stopped")
 	}
 
 	if t.server != nil {
-		t.logger.Printf("Stopping tsnet server")
+		t.log().Info("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
-			t.logger.Printf("failed to close tsnet server: %v", err)
+			t.log().Error("failed to close tsnet server", "error", err)
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
 			t.setState(t.stopped)
 			return err
 		}
-		t.logger.Printf("tsnet server stopped")
+		t.log().Info("tsnet server stopped")
 		t.server = nil
 	}
 
-	t.logger.Printf("Tailnet stopped successfully")
+	t.log().Info("Tailnet stopped successfully")
 
 	t.setState(t.stopped)
 	return nil
@@ -298,24 +308,26 @@ func (t *Tailnet) logout(ctx context.Context) error {
 		t.server = &tsnet.Server{
 			Dir:      t.tsnetStateDir,
 			Hostname: t.userSetHostname,
+			UserLogf: t.tsnetLogf(slog.LevelInfo),
+			Logf:     t.tsnetLogf(slog.LevelDebug),
 		}
 	}
 
 	lc, err := t.server.LocalClient()
 	if err != nil {
-		t.logger.Printf("failed to get LocalClient for logout: %v", err)
+		t.log().Error("failed to get LocalClient for logout", "error", err)
 		return err
 	}
 
-	t.logger.Printf("Logging out from tailnet")
+	t.log().Info("Logging out from tailnet")
 
 	// TODO: Does logout auto close the server?
 	if err := lc.Logout(ctx); err != nil {
-		t.logger.Printf("failed to logout: %v", err)
+		t.log().Error("failed to logout", "error", err)
 		return err
 	}
 
-	t.logger.Printf("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
+	t.log().Info("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
 	return nil
 }
 
@@ -339,7 +351,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 
 	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
 		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
-			t.logger.Println(claimErr)
+			t.log().Error("magic DNS suffix claim error", "error", claimErr.Error())
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
 			t.terminalError = claimErr.Error()
 			t.setLockedStateNoNotify(t.hasTerminalError)
@@ -354,12 +366,17 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 			return
 		}
 
-		t.logger.Printf("failed to claim MagicDNS suffix %s: %v", ipnState.MagicDNSSuffix, err)
+		t.log().Error("failed to claim MagicDNS suffix", "suffix", ipnState.MagicDNSSuffix, "error", err)
 		return
 	}
 
 	// Successfully claimed the MagicDNS suffix. Update our state and notify about the change.
 	t.claimedMagicDNSSuffix = ipnState.MagicDNSSuffix
+
+	// Update logger with the new suffix
+	t.logMu.Lock()
+	t.logger = t.logger.With("magic_dns_suffix", ipnState.MagicDNSSuffix)
+	t.logMu.Unlock()
 
 	// Unlock before notifying about the state change to prevent holding the lock for a long time.
 	// Ideally we can redesign the state notifier to be async.
@@ -417,4 +434,13 @@ func (t *Tailnet) maybeUpdatePeers(ipnState IPNState) {
 	defer t.mu.Unlock()
 
 	t.peers = ipnState.Peers
+}
+
+func (t *Tailnet) tsnetLogf(level slog.Level) func(string, ...any) {
+	return func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		msg = strings.TrimRight(msg, "\n")
+
+		t.log().Log(context.Background(), level, msg, slog.String("subcomponent", "tsnet"))
+	}
 }

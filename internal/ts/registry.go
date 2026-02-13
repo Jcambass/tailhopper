@@ -3,13 +3,13 @@ package ts
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 
-	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/sse"
 	"tailscale.com/util/dnsname"
 )
@@ -55,19 +55,15 @@ type RegisteredTailnet struct {
 type Registry struct {
 	path   string
 	mu     sync.RWMutex
-	logger *logging.Logger
 	nextID int
 
 	tailnets    map[int]*RegisteredTailnet
 	broadcaster sse.Broadcaster
 }
 
-func NewRegistry(path string, logger *logging.Logger, broadcaster sse.Broadcaster) (*Registry, error) {
-	logger = logger.With("component", "registry")
-
+func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
 	m := &Registry{
 		path:        path,
-		logger:      logger,
 		nextID:      1,
 		tailnets:    make(map[int]*RegisteredTailnet),
 		broadcaster: broadcaster,
@@ -141,7 +137,7 @@ func (m *Registry) Load() error {
 				m.broadcaster.BroadcastTailnetChange(c.ID)
 			}
 		}
-		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.SocksPort, m.logger.With("tailnet", c.ID), m, broadcast)
+		tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.SocksPort, m, broadcast)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
@@ -235,7 +231,7 @@ func (m *Registry) Add(hostname string) (*Tailnet, error) {
 		}
 	}
 
-	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m.logger.With("tailnet", c.ID), m, broadcast)
+	tailnet := NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m, broadcast)
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,
 		config:  c,
@@ -268,7 +264,7 @@ func (m *Registry) Delete(id int) error {
 	// Delete the state directory from disk
 	if tailnet.config.StateDir != "" {
 		if err := os.RemoveAll(tailnet.config.StateDir); err != nil {
-			m.logger.Printf("failed to remove state directory %s: %v", tailnet.config.StateDir, err)
+			slog.Warn("failed to remove state directory", "component", "registry", "dir", tailnet.config.StateDir, "error", err)
 			// Continue with deletion even if directory removal fails
 		}
 	}

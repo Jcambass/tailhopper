@@ -1,19 +1,19 @@
 package ui
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
 
-	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 // ServeDashboard renders the main dashboard page.
 func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registry) {
-	logger := logging.FromContext(r.Context()).With("component", "dashboard")
+	ctx := r.Context()
 
 	// Base data structure
 	data := dashboardData{
@@ -28,7 +28,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 	if len(tailnets) == 0 {
 		// No tailnets - render empty dashboard
 		if err := renderTemplate(w, "dashboard.html", data); err != nil {
-			logger.Printf("dashboard: failed to render template: %v", err)
+			slog.InfoContext(ctx, "dashboard: failed to render template", "component", "dashboard", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -130,7 +130,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 	}
 
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		logger.Printf("dashboard: failed to render template: %v", err)
+		slog.InfoContext(ctx, "component", "dashboard", "dashboard: failed to render template", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

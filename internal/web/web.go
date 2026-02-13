@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,13 +23,11 @@ import (
 type Server struct {
 	server       *http.Server
 	addr         string
-	logger       *logging.Logger
 	sseBroadcast *sse.SSEBroadcaster
 }
 
 // NewServer creates and configures a new HTTP server.
 func NewServer(addr string, registry *ts.Registry, broadcaster *sse.SSEBroadcaster) *Server {
-	logger := logging.Default().With("component", "httpserver")
 	mux := http.NewServeMux()
 
 	// Static files
@@ -72,15 +71,14 @@ func NewServer(addr string, registry *ts.Registry, broadcaster *sse.SSEBroadcast
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 		addr:         addr,
-		logger:       logger,
 		sseBroadcast: broadcaster,
 	}
 }
 
 // Start begins serving HTTP requests (blocking).
 func (s *Server) Start() error {
-	s.logger.Printf("PAC file available at http://%s%s", s.addr, pac.URLPath)
-	s.logger.Printf("Dashboard available at http://%s", s.addr)
+	slog.Info("PAC file available", "component", "httpserver", "url", fmt.Sprintf("http://%s%s", s.addr, pac.URLPath))
+	slog.Info("Dashboard available", "component", "httpserver", "url", fmt.Sprintf("http://%s", s.addr))
 	return s.server.ListenAndServe()
 }
 
@@ -88,7 +86,7 @@ func (s *Server) Start() error {
 // Path format: /tailnet/{id}/start, /tailnet/{id}/stop, or /tailnet/{id} (DELETE)
 func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger := logging.FromContext(r.Context())
+		ctx := r.Context()
 
 		// Extract tailnet ID from path
 		pathWithoutPrefix := strings.TrimPrefix(r.URL.Path, "/tailnet/")
@@ -104,7 +102,7 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 		// convert it to int
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			logger.Printf("invalid tailnet id: %s", id)
+			slog.WarnContext(ctx, "invalid tailnet id", "component", "httprequests", "id", idStr)
 			http.Error(w, "invalid tailnet id", http.StatusBadRequest)
 			return
 		}
@@ -123,7 +121,7 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 			tailnet, ok := registry.Get(id)
 
 			if !ok {
-				logger.Printf("tailnet not found for id %d: %v", id, err)
+				slog.WarnContext(ctx, "component", "httprequests", "tailnet not found", "id", id)
 				http.Error(w, "tailnet not found", http.StatusNotFound)
 				return
 			}
@@ -135,22 +133,22 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 
 			err := tailnet.Logout(ctx)
 			if err != nil {
-				logger.Printf("logout failed for tailnet %d: %v", id, err)
+				slog.ErrorContext(r.Context(), "component", "httprequests", "logout failed", "id", id, "error", err)
 				logoutErr = err
 			} else {
-				logger.Printf("logout succeeded for tailnet %d", id)
+				slog.InfoContext(r.Context(), "component", "httprequests", "logout succeeded", "id", id)
 			}
 
 			// If logout failed, we log it but still continue to delete the tailnet locally.
 
 			// Always delete regardless of logout success
 			if err := registry.Delete(id); err != nil {
-				logger.Printf("failed to delete tailnet: %v", err)
+				slog.ErrorContext(r.Context(), "component", "httprequests", "failed to delete tailnet", "error", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
-			logger.Printf("tailnet deleted successfully")
+			slog.InfoContext(r.Context(), "tailnet deleted successfully", "component", "httprequests")
 			broadcaster.BroadcastGlobalChange()
 
 			// Return toast HTML using OOB swap with htmx auto-removal
@@ -168,7 +166,7 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 
 			toastHTML, err := ui.RenderToast(toastType, message)
 			if err != nil {
-				logger.Printf("failed to render toast: %v", err)
+				slog.ErrorContext(r.Context(), "component", "httprequests", "failed to render toast", "error", err)
 				return
 			}
 			fmt.Fprint(w, toastHTML)
@@ -201,14 +199,14 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 
 		if action == "start" {
 			if err := tailnet.Start(r.Context()); err != nil {
-				logger.Printf("failed to start tailnet: %v", err)
+				slog.ErrorContext(r.Context(), "component", "httprequests", "failed to start tailnet", "error", err)
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		} else { // stop
 			if err := tailnet.Stop(r.Context()); err != nil {
-				logger.Printf("failed to stop tailnet: %v", err)
+				slog.ErrorContext(r.Context(), "component", "httprequests", "failed to stop tailnet", "error", err)
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
@@ -222,7 +220,7 @@ func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster
 // createAddTailnetHandler returns an HTTP handler for creating a new tailnet.
 func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *sse.SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger := logging.FromContext(r.Context())
+		ctx := r.Context()
 
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -231,21 +229,21 @@ func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *sse.SSEBroadca
 
 		// Check if there are any unconfigured tailnets
 		if registry.HasUnconfiguredTailnets() {
-			logger.Printf("cannot add new tailnet: unconfigured tailnet exists")
+			slog.WarnContext(ctx, "component", "httprequests", "cannot add new tailnet: unconfigured tailnet exists")
 			http.Error(w, "cannot create new tailnet while an existing tailnet is unconfigured", http.StatusConflict)
 			return
 		}
 
 		tailnet, err := registry.Add("") // Empty hostname will be auto-generated by registry
 		if err != nil {
-			logger.Printf("failed to add tailnet: %v", err)
+			slog.ErrorContext(ctx, "component", "httprequests", "failed to add tailnet", "error", err)
 			http.Error(w, fmt.Sprintf("failed to add tailnet: %v", err), http.StatusBadRequest)
 			return
 		}
 
 		// Automatically start the new tailnet
 		if err := tailnet.Start(r.Context()); err != nil {
-			logger.Printf("failed to start new tailnet: %v", err)
+			slog.ErrorContext(ctx, "component", "httprequests", "failed to start new tailnet", "error", err)
 			// Don't fail the request, the tailnet was created successfully
 		}
 
@@ -266,12 +264,7 @@ func withRequestContext(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-Id", requestID)
 
-		logger := logging.Default().WithFields(map[string]any{
-			"component":  "httprequests",
-			"request_id": requestID,
-		})
-		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
-		ctx = logging.WithContext(ctx, logger)
+		ctx := logging.WithRequestID(r.Context(), requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -286,8 +279,7 @@ func newRequestID() string {
 
 func withRecovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger := logging.FromContext(r.Context())
-		defer logging.CatchPanic(logger)
+		defer logging.CatchPanic(r.Context())
 		next.ServeHTTP(w, r)
 	})
 }
@@ -317,12 +309,12 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 
 func withRequestLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger := logging.FromContext(r.Context())
-		logger.Printf("Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		ctx := r.Context()
+		slog.InfoContext(ctx, "Request", "component", "httprequests", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 
-		logger.Printf("Response: %s %s -> %d", r.Method, r.URL.Path, rw.statusCode)
+		slog.InfoContext(ctx, "component", "httprequests", "Response", "method", r.Method, "path", r.URL.Path, "status", rw.statusCode)
 	})
 }

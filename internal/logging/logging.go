@@ -1,137 +1,56 @@
-// Package logging provides contextual logging helpers.
+// Package logging provides contextual logging helpers using log/slog.
 package logging
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"runtime/debug"
-	"sort"
-	"strings"
 )
 
-type Logger struct {
-	base   *log.Logger
-	fields map[string]any
+type requestIDKey struct{}
+
+// WithRequestID stores a request ID in the context.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, requestID)
 }
 
-func New(base *log.Logger, fields map[string]any) *Logger {
-	if base == nil {
-		base = log.Default()
+// ContextHandler wraps a handler and adds request_id from context to log records.
+type ContextHandler struct {
+	handler slog.Handler
+}
+
+// NewContextHandler creates a new context-aware handler.
+func NewContextHandler(h slog.Handler) *ContextHandler {
+	return &ContextHandler{handler: h}
+}
+
+func (h *ContextHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.handler.Enabled(ctx, level)
+}
+
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if requestID, ok := ctx.Value(requestIDKey{}).(string); ok {
+		r.AddAttrs(slog.String("request_id", requestID))
 	}
-	return &Logger{
-		base:   base,
-		fields: cloneFields(fields),
-	}
+	return h.handler.Handle(ctx, r)
 }
 
-func (l *Logger) With(key string, value any) *Logger {
-	fields := cloneFields(l.fields)
-	if fields == nil {
-		fields = map[string]any{}
-	}
-	fields[key] = value
-	return &Logger{base: l.base, fields: fields}
+func (h *ContextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &ContextHandler{handler: h.handler.WithAttrs(attrs)}
 }
 
-func (l *Logger) WithFields(fields map[string]any) *Logger {
-	if len(fields) == 0 {
-		return l
-	}
-	merged := cloneFields(l.fields)
-	if merged == nil {
-		merged = map[string]any{}
-	}
-	for key, value := range fields {
-		merged[key] = value
-	}
-	return &Logger{base: l.base, fields: merged}
+func (h *ContextHandler) WithGroup(name string) slog.Handler {
+	return &ContextHandler{handler: h.handler.WithGroup(name)}
 }
 
-func (l *Logger) Println(args ...any) {
-	message := fmt.Sprintln(args...)
-	l.base.Printf("%s%s", l.prefix(), message)
-}
-
-func (l *Logger) Printf(format string, args ...any) {
-	message := fmt.Sprintf(format, args...)
-	l.base.Printf("%s%s", l.prefix(), message)
-}
-
-func (l *Logger) Fatalf(format string, args ...any) {
-	message := fmt.Sprintf(format, args...)
-	l.base.Fatalf("%s%s", l.prefix(), message)
-}
-
-func CatchPanic(logger *Logger) {
+// CatchPanic recovers from panics and logs them.
+func CatchPanic(ctx context.Context) {
 	if r := recover(); r != nil {
-		if logger == nil {
-			logger = Default()
-		}
-		logger.Fatalf("panic: %v\nstack: %s", r, debug.Stack())
+		slog.ErrorContext(ctx, "panic recovered",
+			"error", r,
+			"stack", string(debug.Stack()),
+		)
+		os.Exit(1)
 	}
-}
-
-func (l *Logger) prefix() string {
-	if len(l.fields) == 0 {
-		return ""
-	}
-
-	keys := make([]string, 0, len(l.fields))
-	for key := range l.fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	for _, key := range keys {
-		builder.WriteString(key)
-		builder.WriteByte('=')
-		builder.WriteString(fmt.Sprintf("%v", l.fields[key]))
-		builder.WriteByte(' ')
-	}
-	return builder.String()
-}
-
-func cloneFields(fields map[string]any) map[string]any {
-	if len(fields) == 0 {
-		return nil
-	}
-	copyFields := make(map[string]any, len(fields))
-	for key, value := range fields {
-		copyFields[key] = value
-	}
-	return copyFields
-}
-
-type contextKey struct{}
-
-var defaultLogger = New(nil, nil)
-
-func SetDefault(logger *Logger) {
-	if logger == nil {
-		return
-	}
-	defaultLogger = logger
-}
-
-func Default() *Logger {
-	return defaultLogger
-}
-
-func WithContext(ctx context.Context, logger *Logger) context.Context {
-	if logger == nil {
-		logger = defaultLogger
-	}
-	return context.WithValue(ctx, contextKey{}, logger)
-}
-
-func FromContext(ctx context.Context) *Logger {
-	if ctx == nil {
-		return defaultLogger
-	}
-	if logger, ok := ctx.Value(contextKey{}).(*Logger); ok && logger != nil {
-		return logger
-	}
-	return defaultLogger
 }

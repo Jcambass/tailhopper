@@ -3,6 +3,7 @@ package ts
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -18,26 +19,25 @@ type watcher struct {
 	state         IPNState
 	wg            *sync.WaitGroup
 	cancel        context.CancelFunc
-	logger        *logging.Logger
+	logger        *slog.Logger
 }
 
 func newWatcher(tailnet *Tailnet) *watcher {
 	return &watcher{
 		tailnet: tailnet,
 		wg:      &sync.WaitGroup{},
-		logger:  tailnet.logger.WithFields(map[string]any{"component": "watcher", "job": "ipn"}),
+		logger:  slog.Default().With("component", "watcher", "tailnet_id", tailnet.id),
 	}
 }
 
 func (w *watcher) Start() {
-	w.logger.Printf("Starting IPN watcher")
+	w.logger.Info("Starting IPN watcher")
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
-	ctx = logging.WithContext(ctx, w.logger)
 
 	w.wg.Go(func() {
-		defer logging.CatchPanic(w.logger)
-		defer w.logger.Printf("IPN watcher goroutine exiting")
+		defer logging.CatchPanic(context.Background())
+		defer w.logger.Info("IPN watcher goroutine exiting")
 
 		// TODO: Do we need something like this?
 		// Wait a moment for tsnet to initialize
@@ -45,7 +45,7 @@ func (w *watcher) Start() {
 
 		lc, err := w.tailnet.server.LocalClient()
 		if err != nil {
-			w.logger.Printf("failed to get LocalClient for watcher: %v", err)
+			w.logger.Info("failed to get LocalClient for watcher", "error", err)
 			return
 		}
 
@@ -53,7 +53,7 @@ func (w *watcher) Start() {
 		// TODO: Use NotifyInitialHealthState?
 		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
-			w.logger.Printf("failed to watch IPN bus: %v", err)
+			w.logger.Info("failed to watch IPN bus", "error", err)
 			return
 		}
 		w.ipnBusWatcher = watcher
@@ -62,18 +62,18 @@ func (w *watcher) Start() {
 		for {
 			n, err := watcher.Next()
 			if err != nil {
-				w.logger.Printf("IPN watcher error: %v", err)
+				w.logger.Info("IPN watcher error", "error", err)
 				// The watcher can close due to tailnet shutdown; ignore and exit.
 				// Ideally we could distinguish between expected closure and unexpected errors.
 
 				return
 			}
 
-			w.logger.Printf("Received IPN notification: %s", n.String())
+			w.logger.Info("Received IPN notification", "notification", n.String())
 			w.state = w.state.refresh(&n)
-			w.logger.Printf("Updated IPN state: %s", w.state.String())
+			w.logger.Info("Updated IPN state", "state", w.state.String())
 			w.tailnet.ReactToIPNStateChange(ctx, w.state)
-			w.logger.Printf("Tailnet after reacting to IPN state change: %s", w.tailnet.String())
+			w.logger.Info("Tailnet after reacting to IPN state change", "tailnet", w.tailnet.String())
 		}
 	})
 }
@@ -82,15 +82,15 @@ func (w *watcher) Start() {
 func (w *watcher) Stop() {
 	if w.ipnBusWatcher != nil {
 		// TODO: Are all these needed?
-		w.logger.Printf("Canceling IPN watcher ctx")
+		w.logger.Info("Canceling IPN watcher ctx")
 		w.cancel()
 		w.cancel = nil
-		w.logger.Printf("Closing IPN watcher")
+		w.logger.Info("Closing IPN watcher")
 		w.ipnBusWatcher.Close()
 		w.ipnBusWatcher = nil
-		w.logger.Printf("IPN watcher closed, waiting for goroutine to exit")
+		w.logger.Info("IPN watcher closed, waiting for goroutine to exit")
 		w.wg.Wait()
-		w.logger.Printf("IPN watcher stopped successfully")
+		w.logger.Info("IPN watcher stopped successfully")
 	}
 }
 

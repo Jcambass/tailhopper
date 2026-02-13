@@ -3,10 +3,9 @@ package sse
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
-
-	"github.com/jcambass/tailhopper/internal/logging"
 )
 
 type Broadcaster interface {
@@ -18,16 +17,16 @@ type Broadcaster interface {
 type SSEBroadcaster struct {
 	mu          sync.RWMutex
 	subscribers map[string]chan string
-	logger      *logging.Logger
 	nextClient  int
+	logger      *slog.Logger
 }
 
 // NewSSEBroadcaster creates a new SSE broadcaster.
-func NewSSEBroadcaster(logger *logging.Logger) *SSEBroadcaster {
+func NewSSEBroadcaster() *SSEBroadcaster {
 	return &SSEBroadcaster{
 		subscribers: make(map[string]chan string),
-		logger:      logger.With("component", "sse"),
 		nextClient:  1,
+		logger:      slog.Default().With("component", "sse"),
 	}
 }
 
@@ -40,7 +39,7 @@ func (b *SSEBroadcaster) Subscribe(ctx context.Context) (string, <-chan string) 
 	b.subscribers[id] = ch
 	b.mu.Unlock()
 
-	b.logger.Printf("New SSE subscriber: %s (total: %d)", id, len(b.subscribers))
+	b.logger.DebugContext(ctx, "New SSE subscriber", "id", id, "total", len(b.subscribers))
 
 	// Clean up on context cancellation
 	go func() {
@@ -59,7 +58,7 @@ func (b *SSEBroadcaster) Unsubscribe(id string) {
 	if ch, ok := b.subscribers[id]; ok {
 		close(ch)
 		delete(b.subscribers, id)
-		b.logger.Printf("SSE subscriber disconnected: %s (remaining: %d)", id, len(b.subscribers))
+		b.logger.Debug("SSE subscriber disconnected", "id", id, "remaining", len(b.subscribers))
 	}
 }
 
@@ -78,7 +77,7 @@ func (b *SSEBroadcaster) Broadcast(event string) {
 	count := len(subs)
 	b.mu.RUnlock()
 
-	b.logger.Printf("Broadcasting SSE event to %d subscribers", count)
+	b.logger.Debug("Broadcasting SSE event", "subscribers", count)
 
 	for idx, ch := range subs {
 		select {
@@ -86,7 +85,7 @@ func (b *SSEBroadcaster) Broadcast(event string) {
 			// Successfully sent
 		default:
 			// Channel is full, skip this subscriber
-			b.logger.Printf("SSE subscriber %d channel full, skipping event", idx)
+			b.logger.Warn("SSE subscriber channel full, skipping event", "subscriber", idx)
 		}
 	}
 }

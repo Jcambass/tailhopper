@@ -3,10 +3,10 @@ package pac
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
@@ -52,9 +52,9 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 
 func Handler(registry *ts.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		logger := logging.FromContext(r.Context()).With("component", "pac")
+		ctx := r.Context()
 		pac, suffixes := buildPACForTailnets(registry.List())
-		logger.Printf("Serving PAC file for suffixes: %s", strings.Join(suffixes, ", "))
+		slog.InfoContext(ctx, "Serving PAC file", "component", "pac", "suffixes", strings.Join(suffixes, ", "))
 		writePAC(w, pac)
 	}
 }
