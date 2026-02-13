@@ -179,7 +179,7 @@ func (t *Tailnet) setState(state State) {
 	t.currentState = state
 	t.mu.Unlock()
 
-	t.log().Info("set state", slog.String("state", string(state.Name())))
+	t.log().Debug("set state", slog.String("state", string(state.Name())))
 
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
 	if t.broadcast != nil {
@@ -189,7 +189,7 @@ func (t *Tailnet) setState(state State) {
 
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
-	t.log().Info("set state", slog.String("state", string(state.Name())))
+	t.log().Debug("set state", slog.String("state", string(state.Name())))
 }
 
 func (t *Tailnet) log() *slog.Logger {
@@ -201,9 +201,9 @@ func (t *Tailnet) log() *slog.Logger {
 func (t *Tailnet) start(ctx context.Context) error {
 	t.setState(t.starting)
 
-	t.log().Info("Starting tailnet")
+	t.log().Debug("Starting tailnet")
 
-	t.log().Info("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
+	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
 	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
 		t.log().Error("failed to start SOCKS5 proxy", slog.String("error", err.Error()))
@@ -216,7 +216,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 	t.socksProxy.Start()
 
 	// Asynchronously start the server
-	t.log().Info("Starting tsnet server")
+	t.log().Debug("Starting tsnet server")
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
@@ -241,7 +241,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 	}
 
 	// start IPN watcher to observe state changes
-	t.log().Info("Starting IPN watcher")
+	t.log().Debug("Starting IPN watcher")
 	t.watcher = newWatcher(t)
 	t.watcher.Start()
 
@@ -252,10 +252,10 @@ func (t *Tailnet) start(ctx context.Context) error {
 func (t *Tailnet) stop(ctx context.Context) error {
 	t.setState(t.stopping)
 
-	t.log().Info("Stopping tailnet")
+	t.log().Debug("Stopping tailnet")
 
 	if t.socksProxy != nil {
-		t.log().Info("Stopping SOCKS5 proxy")
+		t.log().Debug("Stopping SOCKS5 proxy")
 		err := t.socksProxy.Close()
 		if err != nil {
 			t.log().Error("failed to close SOCKS5 proxy", slog.String("error", err.Error()))
@@ -263,18 +263,18 @@ func (t *Tailnet) stop(ctx context.Context) error {
 			return err
 		}
 		t.socksProxy = nil
-		t.log().Info("SOCKS5 proxy stopped")
+		t.log().Debug("SOCKS5 proxy stopped")
 	}
 
 	if t.watcher != nil {
-		t.log().Info("Stopping watcher")
+		t.log().Debug("Stopping watcher")
 		t.watcher.Stop()
 		t.watcher = nil
-		t.log().Info("Watcher stopped")
+		t.log().Debug("Watcher stopped")
 	}
 
 	if t.server != nil {
-		t.log().Info("Stopping tsnet server")
+		t.log().Debug("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
 			t.log().Error("failed to close tsnet server", slog.String("error", err.Error()))
@@ -283,11 +283,11 @@ func (t *Tailnet) stop(ctx context.Context) error {
 			t.setState(t.stopped)
 			return err
 		}
-		t.log().Info("tsnet server stopped")
+		t.log().Debug("tsnet server stopped")
 		t.server = nil
 	}
 
-	t.log().Info("Tailnet stopped successfully")
+	t.log().Debug("Tailnet stopped successfully")
 
 	t.setState(t.stopped)
 	return nil
@@ -319,7 +319,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 		return err
 	}
 
-	t.log().Info("Logging out from tailnet")
+	t.log().Debug("Logging out from tailnet")
 
 	// TODO: Does logout auto close the server?
 	if err := lc.Logout(ctx); err != nil {
@@ -327,7 +327,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 		return err
 	}
 
-	t.log().Info("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
+	t.log().Debug("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
 	return nil
 }
 

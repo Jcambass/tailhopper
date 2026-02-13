@@ -39,7 +39,7 @@ func (b *SSEBroadcaster) Subscribe(ctx context.Context) (string, <-chan string) 
 	b.subscribers[id] = ch
 	b.mu.Unlock()
 
-	b.logger.DebugContext(ctx, "New SSE subscriber", "id", id, "total", len(b.subscribers))
+	b.logger.DebugContext(ctx, "New SSE subscriber", slog.String("id", id), slog.Int("total", len(b.subscribers)))
 
 	// Clean up on context cancellation
 	go func() {
@@ -58,7 +58,7 @@ func (b *SSEBroadcaster) Unsubscribe(id string) {
 	if ch, ok := b.subscribers[id]; ok {
 		close(ch)
 		delete(b.subscribers, id)
-		b.logger.Debug("SSE subscriber disconnected", "id", id, "remaining", len(b.subscribers))
+		b.logger.Debug("SSE subscriber disconnected", slog.String("id", id), slog.Int("remaining", len(b.subscribers)))
 	}
 }
 
@@ -77,7 +77,7 @@ func (b *SSEBroadcaster) Broadcast(event string) {
 	count := len(subs)
 	b.mu.RUnlock()
 
-	b.logger.Debug("Broadcasting SSE event", "subscribers", count)
+	b.logger.Debug("Broadcasting SSE event", slog.Int("subscribers", count))
 
 	for idx, ch := range subs {
 		select {
@@ -85,7 +85,7 @@ func (b *SSEBroadcaster) Broadcast(event string) {
 			// Successfully sent
 		default:
 			// Channel is full, skip this subscriber
-			b.logger.Warn("SSE subscriber channel full, skipping event", "subscriber", idx)
+			b.logger.Warn("SSE subscriber channel full, skipping event", slog.Int("subscriber", idx))
 		}
 	}
 }

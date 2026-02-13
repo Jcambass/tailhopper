@@ -26,11 +26,11 @@ func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcas
 	r := chi.NewRouter()
 
 	// Global middleware stack
-	r.Use(middleware.RequestID)                  // Built-in: generates request IDs
-	r.Use(withLoggingContext)                    // Custom: integrates request ID with logging context
-	r.Use(middleware.Recoverer)                  // Built-in: graceful panic recovery
-	r.Use(middleware.RealIP)                     // Built-in: extract real IP from headers
-	r.Use(requestLoggingMiddleware)              // Custom: structured request logging
+	r.Use(middleware.RequestID)     // Built-in: generates request IDs
+	r.Use(withLoggingContext)       // Custom: integrates request ID with logging context
+	r.Use(middleware.Recoverer)     // Built-in: graceful panic recovery
+	r.Use(middleware.RealIP)        // Built-in: extract real IP from headers
+	r.Use(requestLoggingMiddleware) // Custom: structured request logging
 
 	// Static files
 	r.Handle("/static/*", ui.StaticHandler())

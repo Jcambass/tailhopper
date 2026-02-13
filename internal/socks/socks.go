@@ -47,7 +47,7 @@ func (s *Server) Start() {
 			slog.ErrorContext(ctx, "SOCKS5 server error", "component", "socksserver", "error", err)
 		}
 	}()
-	slog.Info("SOCKS5 proxy listening", "component", "socksserver", "addr", s.addr)
+	slog.Info("SOCKS5 proxy listening", slog.String("component", "socksserver"), slog.String("addr", s.addr))
 }
 
 // Close stops the SOCKS5 server.

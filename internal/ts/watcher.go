@@ -31,13 +31,13 @@ func newWatcher(tailnet *Tailnet) *watcher {
 }
 
 func (w *watcher) Start() {
-	w.logger.Info("Starting IPN watcher")
+	w.logger.Debug("Starting IPN watcher")
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 
 	w.wg.Go(func() {
 		defer logging.CatchPanic(context.Background())
-		defer w.logger.Info("IPN watcher goroutine exiting")
+		defer w.logger.Debug("IPN watcher goroutine exiting")
 
 		// TODO: Do we need something like this?
 		// Wait a moment for tsnet to initialize
@@ -45,7 +45,7 @@ func (w *watcher) Start() {
 
 		lc, err := w.tailnet.server.LocalClient()
 		if err != nil {
-			w.logger.Info("failed to get LocalClient for watcher", "error", err)
+			w.logger.Error("failed to get LocalClient for watcher", slog.String("error", err.Error()))
 			return
 		}
 
@@ -53,7 +53,7 @@ func (w *watcher) Start() {
 		// TODO: Use NotifyInitialHealthState?
 		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
-			w.logger.Info("failed to watch IPN bus", "error", err)
+			w.logger.Error("failed to watch IPN bus", slog.String("error", err.Error()))
 			return
 		}
 		w.ipnBusWatcher = watcher
@@ -62,18 +62,18 @@ func (w *watcher) Start() {
 		for {
 			n, err := watcher.Next()
 			if err != nil {
-				w.logger.Info("IPN watcher error", "error", err)
+				w.logger.Warn("IPN watcher error", slog.String("error", err.Error()))
 				// The watcher can close due to tailnet shutdown; ignore and exit.
 				// Ideally we could distinguish between expected closure and unexpected errors.
 
 				return
 			}
 
-			w.logger.Info("Received IPN notification", "notification", n.String())
+			w.logger.Debug("Received IPN notification", slog.String("notification", n.String()))
 			w.state = w.state.refresh(&n)
-			w.logger.Info("Updated IPN state", "state", w.state.String())
+			w.logger.Debug("Updated IPN state", slog.String("state", w.state.String()))
 			w.tailnet.ReactToIPNStateChange(ctx, w.state)
-			w.logger.Info("Tailnet after reacting to IPN state change", "tailnet", w.tailnet.String())
+			w.logger.Debug("Tailnet after reacting to IPN state change", slog.String("tailnet", w.tailnet.String()))
 		}
 	})
 }
@@ -82,15 +82,15 @@ func (w *watcher) Start() {
 func (w *watcher) Stop() {
 	if w.ipnBusWatcher != nil {
 		// TODO: Are all these needed?
-		w.logger.Info("Canceling IPN watcher ctx")
+		w.logger.Debug("Canceling IPN watcher ctx")
 		w.cancel()
 		w.cancel = nil
-		w.logger.Info("Closing IPN watcher")
+		w.logger.Debug("Closing IPN watcher")
 		w.ipnBusWatcher.Close()
 		w.ipnBusWatcher = nil
-		w.logger.Info("IPN watcher closed, waiting for goroutine to exit")
+		w.logger.Debug("IPN watcher closed, waiting for goroutine to exit")
 		w.wg.Wait()
-		w.logger.Info("IPN watcher stopped successfully")
+		w.logger.Debug("IPN watcher stopped successfully")
 	}
 }
 

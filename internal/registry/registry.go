@@ -257,7 +257,7 @@ func (m *Registry) Delete(id int) error {
 	if tailnet.config.StateDir != "" {
 		// Delete the state directory from disk
 		if err := os.RemoveAll(tailnet.config.StateDir); err != nil {
-			slog.Warn("failed to remove state directory", "component", "registry", "dir", tailnet.config.StateDir, "error", err)
+			slog.Error("failed to remove state directory", slog.String("component", "registry"), slog.String("dir", tailnet.config.StateDir), slog.String("error", err.Error()))
 			// Continue with deletion even if directory removal fails
 		}
 	}
