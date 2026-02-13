@@ -179,7 +179,7 @@ func (t *Tailnet) setState(state State) {
 	t.currentState = state
 	t.mu.Unlock()
 
-	t.log().Info("set state", "state", string(state.Name()))
+	t.log().Info("set state", slog.String("state", string(state.Name())))
 
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
 	if t.broadcast != nil {
@@ -189,7 +189,7 @@ func (t *Tailnet) setState(state State) {
 
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
-	t.log().Info("set state", "state", string(state.Name()))
+	t.log().Info("set state", slog.String("state", string(state.Name())))
 }
 
 func (t *Tailnet) log() *slog.Logger {
@@ -203,10 +203,10 @@ func (t *Tailnet) start(ctx context.Context) error {
 
 	t.log().Info("Starting tailnet")
 
-	t.log().Info("Starting SOCKS5 proxy", "port", t.socksPort)
+	t.log().Info("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
 	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
-		t.log().Error("failed to start SOCKS5 proxy", "error", err)
+		t.log().Error("failed to start SOCKS5 proxy", slog.String("error", err.Error()))
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
 		t.setState(t.stopped)
@@ -227,12 +227,12 @@ func (t *Tailnet) start(ctx context.Context) error {
 
 	err = t.server.Start()
 	if err != nil {
-		t.log().Error("failed to start tsnet server", "error", err)
+		t.log().Error("failed to start tsnet server", slog.String("error", err.Error()))
 		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
 
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.log().Error("failed to close SOCKS5 proxy after server start failure", "error", err)
+			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.String("error", err.Error()))
 		}
 		t.socksProxy = nil
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
@@ -258,7 +258,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 		t.log().Info("Stopping SOCKS5 proxy")
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.log().Error("failed to close SOCKS5 proxy", "error", err)
+			t.log().Error("failed to close SOCKS5 proxy", slog.String("error", err.Error()))
 			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
 			return err
 		}
@@ -277,7 +277,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 		t.log().Info("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
-			t.log().Error("failed to close tsnet server", "error", err)
+			t.log().Error("failed to close tsnet server", slog.String("error", err.Error()))
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
 			t.setState(t.stopped)
@@ -315,7 +315,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 
 	lc, err := t.server.LocalClient()
 	if err != nil {
-		t.log().Error("failed to get LocalClient for logout", "error", err)
+		t.log().Error("failed to get LocalClient for logout", slog.String("error", err.Error()))
 		return err
 	}
 
@@ -323,7 +323,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 
 	// TODO: Does logout auto close the server?
 	if err := lc.Logout(ctx); err != nil {
-		t.log().Error("failed to logout", "error", err)
+		t.log().Error("failed to logout", slog.String("error", err.Error()))
 		return err
 	}
 
@@ -351,7 +351,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 
 	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
 		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
-			t.log().Error("magic DNS suffix claim error", "error", claimErr.Error())
+			t.log().Error("magic DNS suffix claim error", slog.String("error", claimErr.Error()))
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
 			t.terminalError = claimErr.Error()
 			t.setLockedStateNoNotify(t.hasTerminalError)
@@ -366,7 +366,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 			return
 		}
 
-		t.log().Error("failed to claim MagicDNS suffix", "suffix", ipnState.MagicDNSSuffix, "error", err)
+		t.log().Error("failed to claim MagicDNS suffix", slog.String("suffix", ipnState.MagicDNSSuffix), slog.String("error", err.Error()))
 		return
 	}
 
@@ -441,6 +441,46 @@ func (t *Tailnet) tsnetLogf(level slog.Level) func(string, ...any) {
 		msg := fmt.Sprintf(format, args...)
 		msg = strings.TrimRight(msg, "\n")
 
-		t.log().Log(context.Background(), level, msg, slog.String("subcomponent", "tsnet"))
+		attrs, cleanMsg := parseLogKeyValues(msg)
+		if cleanMsg != "" {
+			msg = cleanMsg
+		}
+
+		allAttrs := make([]any, 0, len(attrs)+1)
+		allAttrs = append(allAttrs, slog.String("subcomponent", "tsnet"))
+		for _, a := range attrs {
+			allAttrs = append(allAttrs, a)
+		}
+
+		t.log().Log(context.Background(), level, msg, allAttrs...)
 	}
+}
+
+func parseLogKeyValues(msg string) ([]slog.Attr, string) {
+	var attrs []slog.Attr
+	var cleanParts []string
+
+	for _, token := range strings.Fields(msg) {
+		key, val, found := strings.Cut(token, "=")
+		if !found || key == "" {
+			cleanParts = append(cleanParts, token)
+			continue
+		}
+
+		// Check if key contains only allowed characters
+		validKey := true
+		for _, r := range key {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+				validKey = false
+				break
+			}
+		}
+		if !validKey {
+			cleanParts = append(cleanParts, token)
+			continue
+		}
+
+		attrs = append(attrs, slog.String(key, val))
+	}
+	return attrs, strings.Join(cleanParts, " ")
 }

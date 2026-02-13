@@ -9,6 +9,7 @@ import (
 	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/web"
+	"github.com/lmittmann/tint"
 )
 
 // Tailhopper: A SOCKS5 proxy for personal Tailnet users.
@@ -29,13 +30,12 @@ func main() {
 		level = slog.LevelInfo
 	}
 
-	opts := &slog.HandlerOptions{
+	opts := &tint.Options{
 		Level: level,
 	}
 
-	// We use NewTextHandler to avoid a deadlock loop with the default handler
-	// which would otherwise route back to the log package when SetDefault is called.
-	handler := logging.NewContextHandler(slog.NewTextHandler(os.Stderr, opts))
+	// We use tint.NewHandler for pretty, colorized logs.
+	handler := logging.NewContextHandler(tint.NewHandler(os.Stderr, opts))
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
