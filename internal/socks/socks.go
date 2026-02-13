@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/net/socks5"
@@ -29,9 +30,38 @@ func NewServer(dial Dialer, port int) (*Server, error) {
 		return nil, err
 	}
 
+	// Wrap the dialer with logging
+	loggingDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		start := time.Now()
+		slog.DebugContext(ctx, "SOCKS5 connection attempt",
+			slog.String("component", "socksserver"),
+			slog.String("network", network),
+			slog.String("dest", addr))
+
+		conn, err := dial(ctx, network, addr)
+		duration := time.Since(start)
+
+		if err != nil {
+			slog.ErrorContext(ctx, "SOCKS5 connection failed",
+				slog.String("component", "socksserver"),
+				slog.String("network", network),
+				slog.String("dest", addr),
+				slog.Duration("duration", duration),
+				slog.Any("error", err))
+			return nil, err
+		}
+
+		slog.DebugContext(ctx, "SOCKS5 connection established",
+			slog.String("component", "socksserver"),
+			slog.String("network", network),
+			slog.String("dest", addr),
+			slog.Duration("duration", duration))
+		return conn, nil
+	}
+
 	return &Server{
 		server: &socks5.Server{
-			Dialer: dial,
+			Dialer: loggingDialer,
 		},
 		listener: listener,
 		addr:     listener.Addr().String(),
@@ -44,7 +74,7 @@ func (s *Server) Start() {
 	go func() {
 		defer logging.CatchPanic(ctx)
 		if err := s.server.Serve(s.listener); err != nil {
-			slog.ErrorContext(ctx, "SOCKS5 server error", "component", "socksserver", "error", err)
+			slog.ErrorContext(ctx, "SOCKS5 server error", slog.String("component", "socksserver"), slog.Any("error", err))
 		}
 	}()
 	slog.Info("SOCKS5 proxy listening", slog.String("component", "socksserver"), slog.String("addr", s.addr))

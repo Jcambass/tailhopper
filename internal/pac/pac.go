@@ -55,7 +55,7 @@ func Handler(reg *registry.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		pac, suffixes := buildPACForTailnets(reg.List())
-		slog.InfoContext(ctx, "Serving PAC file", "component", "pac", "suffixes", strings.Join(suffixes, ", "))
+		slog.InfoContext(ctx, "Serving PAC file", slog.String("component", "pac"), slog.String("suffixes", strings.Join(suffixes, ", ")))
 		writePAC(w, pac)
 	}
 }

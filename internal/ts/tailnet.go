@@ -206,7 +206,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
 	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
 	if err != nil {
-		t.log().Error("failed to start SOCKS5 proxy", slog.String("error", err.Error()))
+		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
 		t.setState(t.stopped)
@@ -227,12 +227,12 @@ func (t *Tailnet) start(ctx context.Context) error {
 
 	err = t.server.Start()
 	if err != nil {
-		t.log().Error("failed to start tsnet server", slog.String("error", err.Error()))
+		t.log().Error("failed to start tsnet server", slog.Any("error", err))
 		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
 
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.String("error", err.Error()))
+			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.Any("error", err))
 		}
 		t.socksProxy = nil
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
@@ -258,7 +258,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 		t.log().Debug("Stopping SOCKS5 proxy")
 		err := t.socksProxy.Close()
 		if err != nil {
-			t.log().Error("failed to close SOCKS5 proxy", slog.String("error", err.Error()))
+			t.log().Error("failed to close SOCKS5 proxy", slog.Any("error", err))
 			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
 			return err
 		}
@@ -277,7 +277,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 		t.log().Debug("Stopping tsnet server")
 		err := t.server.Close()
 		if err != nil {
-			t.log().Error("failed to close tsnet server", slog.String("error", err.Error()))
+			t.log().Error("failed to close tsnet server", slog.Any("error", err))
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
 			t.setState(t.stopped)
@@ -315,7 +315,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 
 	lc, err := t.server.LocalClient()
 	if err != nil {
-		t.log().Error("failed to get LocalClient for logout", slog.String("error", err.Error()))
+		t.log().Error("failed to get LocalClient for logout", slog.Any("error", err))
 		return err
 	}
 
@@ -323,7 +323,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 
 	// TODO: Does logout auto close the server?
 	if err := lc.Logout(ctx); err != nil {
-		t.log().Error("failed to logout", slog.String("error", err.Error()))
+		t.log().Error("failed to logout", slog.Any("error", err))
 		return err
 	}
 
@@ -351,7 +351,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 
 	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
 		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
-			t.log().Error("magic DNS suffix claim error", slog.String("error", claimErr.Error()))
+			t.log().Error("magic DNS suffix claim error", slog.Any("error", claimErr))
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
 			t.terminalError = claimErr.Error()
 			t.setLockedStateNoNotify(t.hasTerminalError)
@@ -366,7 +366,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 			return
 		}
 
-		t.log().Error("failed to claim MagicDNS suffix", slog.String("suffix", ipnState.MagicDNSSuffix), slog.String("error", err.Error()))
+		t.log().Error("failed to claim MagicDNS suffix", slog.String("suffix", ipnState.MagicDNSSuffix), slog.Any("error", err))
 		return
 	}
 

@@ -45,7 +45,7 @@ func (w *watcher) Start() {
 
 		lc, err := w.tailnet.server.LocalClient()
 		if err != nil {
-			w.logger.Error("failed to get LocalClient for watcher", slog.String("error", err.Error()))
+			w.logger.Error("failed to get LocalClient for watcher", slog.Any("error", err))
 			return
 		}
 
@@ -53,7 +53,7 @@ func (w *watcher) Start() {
 		// TODO: Use NotifyInitialHealthState?
 		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
-			w.logger.Error("failed to watch IPN bus", slog.String("error", err.Error()))
+			w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
 			return
 		}
 		w.ipnBusWatcher = watcher
@@ -62,7 +62,7 @@ func (w *watcher) Start() {
 		for {
 			n, err := watcher.Next()
 			if err != nil {
-				w.logger.Warn("IPN watcher error", slog.String("error", err.Error()))
+				w.logger.Warn("IPN watcher error", slog.Any("error", err))
 				// The watcher can close due to tailnet shutdown; ignore and exit.
 				// Ideally we could distinguish between expected closure and unexpected errors.
 

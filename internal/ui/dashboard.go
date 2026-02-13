@@ -29,7 +29,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 	if len(tailnets) == 0 {
 		// No tailnets - render empty dashboard
 		if err := renderTemplate(w, "dashboard.html", data); err != nil {
-			slog.InfoContext(ctx, "dashboard: failed to render template", "component", "dashboard", "error", err)
+			slog.ErrorContext(ctx, "dashboard: failed to render template", slog.String("component", "dashboard"), slog.Any("error", err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -131,7 +131,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 	}
 
 	if err := renderTemplate(w, "dashboard.html", data); err != nil {
-		slog.InfoContext(ctx, "component", "dashboard", "dashboard: failed to render template", "error", err)
+		slog.ErrorContext(ctx, "dashboard: failed to render template", slog.String("component", "dashboard"), slog.Any("error", err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

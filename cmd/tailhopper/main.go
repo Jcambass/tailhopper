@@ -9,7 +9,6 @@ import (
 	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/web"
-	"github.com/lmittmann/tint"
 )
 
 // Tailhopper: A SOCKS5 proxy for personal Tailnet users.
@@ -30,12 +29,14 @@ func main() {
 		level = slog.LevelInfo
 	}
 
-	opts := &tint.Options{
-		Level: level,
+	opts := &slog.HandlerOptions{
+		Level:       level,
+		AddSource:   true,
+		ReplaceAttr: logging.SimplifySource(),
 	}
 
-	// We use tint.NewHandler for pretty, colorized logs.
-	handler := logging.NewContextHandler(tint.NewHandler(os.Stderr, opts))
+	// Use text handler for logfmt structured logging, pipe through hl for colored output
+	handler := logging.NewContextHandler(slog.NewTextHandler(os.Stderr, opts))
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
@@ -46,7 +47,7 @@ func main() {
 
 	reg, err := registry.NewRegistry("./tailhopper.json", seeBroadcaster)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to initialize registry", "error", err)
+		slog.ErrorContext(ctx, "failed to initialize registry", slog.Any("error", err))
 		os.Exit(1)
 	}
 
@@ -61,7 +62,7 @@ func main() {
 	dashboardSrv := web.NewServer(dashboardAddr, reg, seeBroadcaster)
 
 	if err := dashboardSrv.Start(); err != nil {
-		slog.ErrorContext(ctx, "dashboard server error", "error", err)
+		slog.ErrorContext(ctx, "dashboard server error", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
