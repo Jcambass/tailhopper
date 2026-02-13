@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+
+	"github.com/jcambass/tailhopper/internal/ts"
 )
 
 //go:embed templates/*.html templates/partials/*.html templates/partials/*.svg static/*
@@ -69,19 +71,70 @@ type dashboardData struct {
 	HasTailnets             bool
 }
 
+type StateClass string
+
+const (
+	StateClassConnected  StateClass = "connected"
+	StateClassNeedsLogin StateClass = "needs-login"
+	StateClassNeedsAuth  StateClass = "needs-auth"
+	StateClassConnecting StateClass = "connecting"
+	StateClassDisabling  StateClass = "disabling"
+	StateClassDisabled   StateClass = "disabled"
+	StateClassError      StateClass = "error"
+)
+
 // tailnetCard contains all data for rendering a single tailnet card.
 type tailnetCard struct {
-	ID             string
-	BaseDomain     string
-	Hostname       string
-	SocksAddr      string
-	SocksHost      string
-	SocksPort      string
-	Machines       []machineView
-	StateClass     string // "connected", "needs-login", "connecting", "error"
-	AuthURL        string
-	LifecycleState string
-	ErrorMsg       string
+	ID         int
+	BaseDomain string
+	SocksAddr  string
+	SocksHost  string
+	SocksPort  string
+	Machines   []machineView
+	stateName  ts.StateName
+	Hostname   string
+	AuthURL    string
+	ErrorMsg   string
+}
+
+func (c tailnetCard) StateClass() StateClass {
+	switch c.stateName {
+	case ts.ConnectedStateName:
+		return StateClassConnected
+	case ts.HasTerminalErrorStateName:
+		return StateClassError
+	case ts.NeedsLoginStateName:
+		return StateClassNeedsLogin
+	case ts.NeedsMachineAuthStateName:
+		return StateClassNeedsAuth
+	case ts.StartingStateName, ts.StartedStateName:
+		return StateClassConnecting
+	case ts.StoppingStateName:
+		return StateClassDisabling
+	case ts.StoppedStateName:
+		return StateClassDisabled
+	default:
+		panic("unexpected state name: " + string(c.stateName))
+	}
+}
+
+func (c tailnetCard) IsToggleOn() bool {
+	return c.stateName != ts.StoppingStateName && c.stateName != ts.StoppedStateName
+}
+
+func (c tailnetCard) IsToggleDisabled() bool {
+	return c.stateName == ts.StartingStateName || c.stateName == ts.StoppingStateName || c.stateName == ts.HasTerminalErrorStateName
+}
+
+func (c tailnetCard) ToggleAction() string {
+	if c.IsToggleOn() {
+		return "stop"
+	}
+	return "start"
+}
+
+func (c tailnetCard) IsErrorState() bool {
+	return c.stateName == ts.HasTerminalErrorStateName
 }
 
 // machineView represents a machine for display.

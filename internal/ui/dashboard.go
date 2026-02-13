@@ -9,7 +9,6 @@ import (
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/ts"
-	"tailscale.com/ipn"
 )
 
 // ServeDashboard renders the main dashboard page.
@@ -40,86 +39,54 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 
 	// Render a card for each tailnet
 	for _, tailnet := range tailnets {
-		state := tailnet.LatestState()
 
 		bestEffortDomain := "Tailnet"
-		if state.MagicDNSSuffix != "" {
-			bestEffortDomain = state.MagicDNSSuffix
-		}
-
-		hostname := ""
-		if state.SelfNode.Valid() {
-			hostname = state.SelfNode.ComputedName()
+		tailnetMagicDNSSuffix := tailnet.MagicDNSSuffix()
+		if tailnetMagicDNSSuffix != "" {
+			bestEffortDomain = tailnetMagicDNSSuffix
 		}
 
 		card := tailnetCard{
-			ID:             tailnet.ID(),
-			BaseDomain:     bestEffortDomain,
-			Hostname:       hostname,
-			LifecycleState: string(tailnet.LifecycleState()),
+			ID:         tailnet.ID(),
+			BaseDomain: bestEffortDomain,
+			stateName:  tailnet.StateName(),
+			Hostname:   tailnet.Hostname(),
 		}
 
-		// Check for terminal errors first
-		if termErr := tailnet.TerminalError(); termErr != "" {
-			card.StateClass = "error"
-			card.ErrorMsg = termErr
-			data.Tailnets = append(data.Tailnets, card)
-			continue
-		}
-
-		switch card.LifecycleState {
-		case string(ts.LifecycleStarting):
-			card.StateClass = "connecting"
-			data.Tailnets = append(data.Tailnets, card)
-			continue
-		case string(ts.LifecycleStopping):
-			card.StateClass = "disabling"
-			data.Tailnets = append(data.Tailnets, card)
-			continue
-		case string(ts.LifecycleStopped):
-			card.StateClass = "disabled"
-			data.Tailnets = append(data.Tailnets, card)
-			continue
-		default:
-			// continue processing
-		}
-
-		if state.State == nil {
-			card.StateClass = "connecting"
-			data.Tailnets = append(data.Tailnets, card)
-			continue
-		}
-
-		switch *state.State {
-		case ipn.NoState:
-			card.StateClass = "connecting"
-		case ipn.InUseOtherUser:
-			// should never happen to us. Consider failure for now.
-			logger.Printf("dashboard: unexpected state InUseOtherUser for tailnet")
-			card.StateClass = "error"
-		case ipn.NeedsLogin:
-			// If we don't have the auth URL yet, treat it as still connecting
-			if state.BrowseToURL == nil || *state.BrowseToURL == "" {
-				card.StateClass = "connecting"
-			} else {
-				card.StateClass = "needs-login"
-				card.AuthURL = *state.BrowseToURL
+		if tailnet.StateName() == ts.HasTerminalErrorStateName {
+			terminalErr, err := tailnet.TerminalError()
+			if err != nil {
+				panic("unexpected error getting terminal error for tailnet in error state: " + err.Error())
 			}
-		case ipn.NeedsMachineAuth:
-			card.StateClass = "needs-auth"
-		case ipn.Stopped:
-			card.StateClass = "disabled"
-		case ipn.Starting:
-			card.StateClass = "connecting"
-		case ipn.Running:
+			card.ErrorMsg = terminalErr
+
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		}
+
+		if tailnet.StateName() == ts.NeedsLoginStateName {
+			loginURL, err := tailnet.LoginURL()
+			if err != nil {
+				panic("unexpected error getting login URL for tailnet in needs-login state: " + err.Error())
+			}
+			card.AuthURL = loginURL
+			data.Tailnets = append(data.Tailnets, card)
+			continue
+		}
+
+		if tailnet.StateName() == ts.ConnectedStateName {
 			socksAddr := tailnet.SocksAddr()
 			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 			card.SocksAddr = socksAddr
 			card.SocksHost = socksHost
 			card.SocksPort = socksPort
 
+			peers, err := tailnet.Peers()
+			if err != nil {
+				panic("unexpected error getting peers for tailnet in connected state: " + err.Error())
+			}
 			// Add peer machines
-			for _, peer := range state.Peers {
+			for _, peer := range peers {
 				if peer.Addresses().Len() == 0 {
 					continue
 				}
@@ -152,12 +119,13 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, registry *ts.Registr
 				return strings.ToLower(card.Machines[i].DNSName) < strings.ToLower(card.Machines[j].DNSName)
 			})
 
-			card.StateClass = "connected"
-		default:
-			logger.Printf("dashboard: unknown state: %s", state.String())
-			card.StateClass = "error"
+			card.stateName = ts.ConnectedStateName
+
+			data.Tailnets = append(data.Tailnets, card)
+			continue
 		}
 
+		// For all other states it's simple
 		data.Tailnets = append(data.Tailnets, card)
 	}
 

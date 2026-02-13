@@ -7,11 +7,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"github.com/jcambass/tailhopper/internal/pac"
+	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/ui"
 )
@@ -21,19 +23,12 @@ type Server struct {
 	server       *http.Server
 	addr         string
 	logger       *logging.Logger
-	sseBroadcast *SSEBroadcaster
+	sseBroadcast *sse.SSEBroadcaster
 }
 
 // NewServer creates and configures a new HTTP server.
-func NewServer(addr string, registry *ts.Registry) *Server {
+func NewServer(addr string, registry *ts.Registry, broadcaster *sse.SSEBroadcaster) *Server {
 	logger := logging.Default().With("component", "httpserver")
-	sseBroadcast := NewSSEBroadcaster(logger)
-
-	// Wire up SSE notifications from registry
-	registry.SetStateChangeNotifier(func(tailnetID string) {
-		sseBroadcast.NotifyStateChange(tailnetID)
-	})
-
 	mux := http.NewServeMux()
 
 	// Static files
@@ -47,7 +42,7 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 
 	// SSE endpoint
 	mux.Handle("/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sseBroadcast.ServeSSE(w, r)
+		broadcaster.ServeSSE(w, r)
 	}))
 
 	// Dashboard
@@ -65,8 +60,8 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 	}))
 
 	// Tailnet handlers - must be registered before the general /tailnet/ pattern
-	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry, sseBroadcast)))
-	mux.Handle("/tailnet/", withRequestLogging(createTailnetHandler(registry, sseBroadcast)))
+	mux.Handle("/tailnet/add", withRequestLogging(createAddTailnetHandler(registry, broadcaster)))
+	mux.Handle("/tailnet/", withRequestLogging(createTailnetHandler(registry, broadcaster)))
 
 	rootHandler := withRequestContext(withRecovery(mux))
 
@@ -78,7 +73,7 @@ func NewServer(addr string, registry *ts.Registry) *Server {
 		},
 		addr:         addr,
 		logger:       logger,
-		sseBroadcast: sseBroadcast,
+		sseBroadcast: broadcaster,
 	}
 }
 
@@ -91,7 +86,7 @@ func (s *Server) Start() error {
 
 // createTailnetHandler returns an HTTP handler for tailnet start/stop/delete operations.
 // Path format: /tailnet/{id}/start, /tailnet/{id}/stop, or /tailnet/{id} (DELETE)
-func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
+func createTailnetHandler(registry *ts.Registry, broadcaster *sse.SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
@@ -104,7 +99,15 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 			return
 		}
 
-		id := parts[0]
+		idStr := parts[0]
+
+		// convert it to int
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			logger.Printf("invalid tailnet id: %s", id)
+			http.Error(w, "invalid tailnet id", http.StatusBadRequest)
+			return
+		}
 
 		// Handle DELETE /tailnet/{id}
 		if r.Method == http.MethodDelete {
@@ -116,12 +119,15 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 			logoutSucceeded := false
 			var logoutErr error
 
+			// TODO: BROKEN This does not handle starting and stopping states.
+			// It also does not handle all other sub states we now have.
+			// Let's consider adding something to the states themsels to handle this logic!
+			// Ideally we add a new state for this situation that startups temporarly and logsout and than transitions to stopped again.
+
 			// Try to logout and stop the tailnet
 			if tailnet, ok := registry.Get(id); ok {
-				wasStoppedInitially := tailnet.LifecycleState() == ts.LifecycleStopped
-
 				// If stopped, try to start it temporarily for logout
-				if wasStoppedInitially {
+				if tailnet.StateName() == ts.StoppedStateName {
 					logger.Printf("attempting to start stopped tailnet for logout")
 					if err := tailnet.Start(r.Context()); err != nil {
 						logger.Printf("failed to start tailnet for logout: %v", err)
@@ -132,7 +138,7 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 						startSuccess := false
 						for i := 0; i < 6; i++ {
 							time.Sleep(500 * time.Millisecond)
-							if tailnet.LifecycleState() == ts.LifecycleStarted {
+							if tailnet.StateName() == ts.StartedStateName {
 								startSuccess = true
 								break
 							}
@@ -145,7 +151,7 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 				}
 
 				// Try to logout if we have a running tailnet
-				if tailnet.LifecycleState() == ts.LifecycleStarted {
+				if tailnet.StateName() == ts.StartedStateName {
 					if err := tailnet.Logout(r.Context()); err != nil {
 						logger.Printf("failed to logout from tailnet: %v", err)
 						logoutErr = err
@@ -156,7 +162,7 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 				}
 
 				// Stop the tailnet if it's running
-				if tailnet.LifecycleState() != ts.LifecycleStopped {
+				if tailnet.StateName() != ts.StoppedStateName {
 					if err := tailnet.Stop(r.Context()); err != nil {
 						logger.Printf("failed to stop tailnet before deletion: %v", err)
 						// Continue with deletion anyway
@@ -172,7 +178,7 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 			}
 
 			logger.Printf("tailnet deleted successfully (logout: %v)", logoutSucceeded)
-			sseBroadcast.NotifyGlobalChange()
+			broadcaster.BroadcastGlobalChange()
 
 			// Return toast HTML using OOB swap with htmx auto-removal
 			w.Header().Set("Content-Type", "text/html")
@@ -244,7 +250,7 @@ func createTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) h
 }
 
 // createAddTailnetHandler returns an HTTP handler for creating a new tailnet.
-func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster) http.Handler {
+func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *sse.SSEBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := logging.FromContext(r.Context())
 
@@ -274,7 +280,7 @@ func createAddTailnetHandler(registry *ts.Registry, sseBroadcast *SSEBroadcaster
 		}
 
 		// Notify about new tailnet (registry also sends notification, but this ensures immediate update)
-		sseBroadcast.NotifyGlobalChange()
+		sseBroadcast.BroadcastGlobalChange()
 
 		w.WriteHeader(http.StatusCreated)
 	})
@@ -290,7 +296,7 @@ func withRequestContext(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-Id", requestID)
 
-		logger := logging.Default().WithFields(map[string]string{
+		logger := logging.Default().WithFields(map[string]any{
 			"component":  "httprequests",
 			"request_id": requestID,
 		})

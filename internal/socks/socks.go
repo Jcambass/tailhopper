@@ -40,11 +40,6 @@ func NewServer(dial Dialer, port int) (*Server, error) {
 	}, nil
 }
 
-// Addr returns the address the server is listening on.
-func (s *Server) Addr() string {
-	return s.addr
-}
-
 // Start begins serving SOCKS5 connections in the background.
 func (s *Server) Start() {
 	go func() {

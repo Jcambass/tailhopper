@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/logging"
@@ -15,124 +14,30 @@ import (
 	"tailscale.com/tsnet"
 )
 
-// LifecycleState represents the lifecycle state of a Tailnet.
-type LifecycleState string
-
-const (
-	// LifecycleStopped indicates the Tailnet is fully stopped.
-	LifecycleStopped LifecycleState = "stopped"
-	// LifecycleStopping indicates the Tailnet is shutting down.
-	LifecycleStopping LifecycleState = "stopping"
-	// LifecycleStarted indicates the Tailnet is fully started and running.
-	LifecycleStarted LifecycleState = "started"
-	// LifecycleStarting indicates the Tailnet is starting up.
-	LifecycleStarting LifecycleState = "starting"
-)
-
-type stateView struct {
-	//// From Notify.*
-	// State is the current state of the Tailscale connection.
-	State *ipn.State
-	// ErrMessage, if non-nil, contains a critical error message.
-	// For State InUseOtherUser, ErrMessage is not critical and just contains the details.
-	ErrMessage *string
-	// BrowseToURL, if non-nil, UI should open a browser right now
-	BrowseToURL *string
-
-	//// From Notify.NetMap.*
-	// SelfNode is the current node's view of itself.
-	SelfNode tailcfg.NodeView
-	// MagicDNSSuffix is the MagicDNS suffix for the Tailnet, if any.
-	// This can be used for routing but will not work for shared-in nodes or if magic DNS is disabled.
-	MagicDNSSuffix string
-
-	// Peers is the list of peers in the Tailnet.
-	Peers []tailcfg.NodeView
-	// DisplayMessages are the list of health check problems for this
-	// node from the perspective of the control plane.
-	// If empty, there are no known problems from the control plane's
-	// point of view, but the node might know about its own health
-	// check problems.
-	DisplayMessages map[tailcfg.DisplayMessageID]tailcfg.DisplayMessage
-}
-
-func (s stateView) mergeWithNotify(n *ipn.Notify) stateView {
-	if n.State != nil {
-		s.State = n.State
-	}
-	if n.ErrMessage != nil {
-		s.ErrMessage = n.ErrMessage
-	}
-	if n.BrowseToURL != nil {
-		s.BrowseToURL = n.BrowseToURL
-	}
-	if n.NetMap != nil {
-		s.SelfNode = n.NetMap.SelfNode
-		if n.NetMap.SelfNode.Valid() && n.NetMap.SelfNode.Name() != "" {
-			// TODO: Explicitly error out if magic DNS is disabled
-			// Or find a sane way to handle these cases.
-			magicDNSSuffix := extractMagicDNSSuffix(n.NetMap.SelfNode.Name())
-			if magicDNSSuffix != "" {
-				s.MagicDNSSuffix = magicDNSSuffix
-			}
-		}
-		s.Peers = n.NetMap.Peers
-		s.DisplayMessages = n.NetMap.DisplayMessages
-	}
-	return s
-}
-
-// Example: "host.tail-scale.ts.net." -> "tail-scale.ts.net"
-// Just removed any trailing dot and the first label.
-func extractMagicDNSSuffix(fqdn string) string {
-	fqdn = strings.TrimSuffix(fqdn, ".")
-	parts := strings.SplitN(fqdn, ".", 2)
-	if len(parts) == 2 {
-		return parts[1]
-	}
-	return ""
-}
-
-func (s stateView) String() string {
-	var sb strings.Builder
-	sb.WriteString("stateView{")
-	if s.State != nil {
-		fmt.Fprintf(&sb, "state=%v ", *s.State)
-	}
-	if s.ErrMessage != nil {
-		fmt.Fprintf(&sb, "err=%q ", *s.ErrMessage)
-	}
-	if s.BrowseToURL != nil {
-		fmt.Fprintf(&sb, "url=%q ", *s.BrowseToURL)
-	}
-
-	if s.SelfNode.Valid() {
-		fmt.Fprintf(&sb, "selfNode=%v ", s.SelfNode.ComputedName())
-	}
-	if len(s.Peers) > 0 {
-		fmt.Fprintf(&sb, "peers=%d ", len(s.Peers))
-	}
-	if len(s.DisplayMessages) > 0 {
-		fmt.Fprintf(&sb, "displayMessages=%d ", len(s.DisplayMessages))
-	}
-	str := sb.String()
-	if str == "stateView{" {
-		return "stateView{}"
-	} else {
-		return str[0:len(str)-1] + "}"
-	}
-}
-
 type Tailnet struct {
-	id              string
-	tsnetStateDir   string
-	userSetHostname string
-	socksPort       int
-	lockedDomain    string
+	id                    int
+	tsnetStateDir         string
+	userSetHostname       string
+	socksPort             int
+	claimedMagicDNSSuffix string
+	terminalError         string
 
-	latestState    stateView
-	mu             sync.RWMutex // protects lifecycleState and lifecycle operations
-	lifecycleState LifecycleState
+	// TODO: Also store hostname from tailscale
+	// SelfNode.ComputedName()
+
+	peers    []tailcfg.NodeView
+	loginURL string
+
+	mu               sync.RWMutex
+	currentState     State
+	connected        State
+	hasTerminalError State
+	needsLogin       State
+	needsMachineAuth State
+	started          State
+	starting         State
+	stopped          State
+	stopping         State
 
 	logger *logging.Logger
 
@@ -140,148 +45,71 @@ type Tailnet struct {
 	watcher    *watcher
 	socksProxy *socks.Server
 
-	// terminalError stores a fatal error that prevents the tailnet from starting
-	terminalErrorMu sync.RWMutex
-	terminalError   string
-
-	// domainLocker is called when a domain is detected for this tailnet
-	domainLocker func(domain string) error
-	// terminalErrorSaver is called when a terminal error is set to persist it
-	terminalErrorSaver func(errMsg string) error
-	// stateNotifier is called when the state of this tailnet changes
-	stateNotifier func()
+	magicDNSSuffixRegistry MagicDNSSuffixRegistry
+	broadcast              func()
 }
 
-func NewTailnet(id string, tsnetStateDir string, hostname string, lockedDomain string, terminalError string, socksPort int, logger *logging.Logger, domainLocker func(domain string) error, terminalErrorSaver func(errMsg string) error, stateNotifier func()) *Tailnet {
+func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, socksPort int, logger *logging.Logger, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func()) *Tailnet {
 	if logger == nil {
 		logger = logging.Default().With("component", "tailnet")
 	}
 
-	return &Tailnet{
-		id:                 id,
-		tsnetStateDir:      tsnetStateDir,
-		userSetHostname:    hostname,
-		socksPort:          socksPort,
-		lockedDomain:       lockedDomain,
-		terminalError:      terminalError,
-		logger:             logger,
-		lifecycleState:     LifecycleStopped,
-		domainLocker:       domainLocker,
-		terminalErrorSaver: terminalErrorSaver,
-		stateNotifier:      stateNotifier,
-		latestState: stateView{
-			MagicDNSSuffix: lockedDomain,
-		},
+	t := &Tailnet{
+		id:                     id,
+		tsnetStateDir:          tsnetStateDir,
+		userSetHostname:        hostname,
+		socksPort:              socksPort,
+		claimedMagicDNSSuffix:  claimedMagicDNSSuffix,
+		terminalError:          terminalError,
+		logger:                 logger,
+		magicDNSSuffixRegistry: magicDNSSuffixRegistry,
+		broadcast:              broadcast,
+	}
+
+	t.connected = &ConnectedState{tailnet: t}
+	t.hasTerminalError = &HasTerminalErrorState{tailnet: t}
+	t.needsLogin = &NeedsLoginState{tailnet: t}
+	t.needsMachineAuth = &NeedsMachineAuthState{tailnet: t}
+	t.started = &StartedState{tailnet: t}
+	t.starting = &StartingState{tailnet: t}
+	t.stopped = &StoppedState{tailnet: t}
+
+	if terminalError != "" {
+		t.setState(t.hasTerminalError)
+	} else {
+		t.setState(t.stopped)
+	}
+
+	return t
+}
+
+func (t *Tailnet) String() string {
+	return fmt.Sprintf("Tailnet{id: %d, state: %s, claimedMagicDNSSuffix: %s, terminalError: %s, socksPort: %d, userSetHostname: %s, peers: %d}", t.id, t.currentState.Name(), t.claimedMagicDNSSuffix, t.terminalError, t.socksPort, t.userSetHostname, len(t.peers))
+}
+
+func (t *Tailnet) setState(state State) {
+	t.mu.Lock()
+	t.currentState = state
+	t.mu.Unlock()
+
+	// Notify about the state change after unlocking to prevent holding the lock for a long time.
+	if t.broadcast != nil {
+		t.broadcast()
 	}
 }
 
-func (t *Tailnet) ID() string {
+func (t *Tailnet) setLockedStateNoNotify(state State) {
+	t.currentState = state
+}
+
+func (t *Tailnet) ID() int {
 	return t.id
 }
 
-func (t *Tailnet) LockedDomain() string {
-	return t.lockedDomain
-}
-
-func (t *Tailnet) setLockedDomain(domain string) {
-	t.lockedDomain = domain
-}
-
-func (t *Tailnet) LatestState() stateView {
-	return t.latestState
-}
-
-func (t *Tailnet) LifecycleState() LifecycleState {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.lifecycleState
-}
-
-func (t *Tailnet) TerminalError() string {
-	t.terminalErrorMu.RLock()
-	defer t.terminalErrorMu.RUnlock()
-	return t.terminalError
-}
-
-func (t *Tailnet) setTerminalError(err string) {
-	t.terminalErrorMu.Lock()
-	t.terminalError = err
-	t.terminalErrorMu.Unlock()
-
-	// Persist the terminal error
-	if t.terminalErrorSaver != nil {
-		if saveErr := t.terminalErrorSaver(err); saveErr != nil {
-			t.logger.Printf("failed to save terminal error: %v", saveErr)
-		}
-	}
-
-	if t.stateNotifier != nil {
-		t.stateNotifier()
-	}
-}
-
-// setLifecycleState updates the lifecycle state.
-// Must be called with t.mu held (exclusive lock).
-func (t *Tailnet) setLifecycleState(state LifecycleState) {
-	if t.lifecycleState == state {
-		return
-	}
-	t.lifecycleState = state
-
-	if t.stateNotifier != nil {
-		t.stateNotifier()
-	}
-}
-
-func (t *Tailnet) UpdateLatestState(n *ipn.Notify) {
-	oldSuffix := t.latestState.MagicDNSSuffix
-	t.latestState = t.latestState.mergeWithNotify(n)
-
-	// If we just learned the domain, lock it
-	if oldSuffix == "" && t.latestState.MagicDNSSuffix != "" && t.domainLocker != nil {
-		if err := t.domainLocker(t.latestState.MagicDNSSuffix); err != nil {
-			t.logger.Printf("failed to lock domain %s: %v", t.latestState.MagicDNSSuffix, err)
-			// This is a terminal error - the tailnet is trying to use a domain that's already in use
-			t.setTerminalError(err.Error())
-			// Stop the tailnet since it cannot proceed
-			go func() {
-				if err := t.Stop(context.Background()); err != nil {
-					t.logger.Printf("failed to stop tailnet after domain lock failure: %v", err)
-				}
-			}()
-			return
-		}
-	}
-
-	// Notify about the state change
-	if t.stateNotifier != nil {
-		t.stateNotifier()
-	}
-}
-
-func (t *Tailnet) Start(ctx context.Context) error {
-	// Check for terminal errors first
-	if termErr := t.TerminalError(); termErr != "" {
-		return fmt.Errorf("tailnet has a terminal error and cannot be started: %s", termErr)
-	}
-
-	if !t.mu.TryLock() {
-		return errors.New("tailnet is in the process of starting or stopping")
-	}
-	if t.lifecycleState == LifecycleStarting || t.lifecycleState == LifecycleStarted {
-		t.mu.Unlock()
-		return errors.New("tailnet that is already started cannot be started again")
-	}
-	t.setLifecycleState(LifecycleStarting)
-	defer t.mu.Unlock()
-	defer t.setLifecycleState(LifecycleStarted)
+func (t *Tailnet) start(ctx context.Context) error {
+	t.setState(t.starting)
 
 	t.logger.Printf("Starting tailnet")
-
-	// Reset previous state
-	t.latestState = stateView{
-		MagicDNSSuffix: t.lockedDomain, // Preserve locked domain
-	}
 
 	t.server = &tsnet.Server{
 		Dir:      t.tsnetStateDir,
@@ -292,6 +120,8 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	if err != nil {
 		t.logger.Printf("failed to start SOCKS5 proxy: %v", err)
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
+		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
+		t.setState(t.stopped)
 		return err
 	}
 	t.socksProxy = socksProxy
@@ -313,23 +143,21 @@ func (t *Tailnet) Start(ctx context.Context) error {
 			t.logger.Printf("failed to close SOCKS5 proxy after server start failure: %v", err)
 		}
 		t.socksProxy = nil
+		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
+		t.setState(t.stopped)
 		return err
 	}
 
+	t.setState(t.started)
 	return nil
 }
 
-func (t *Tailnet) Stop(ctx context.Context) error {
-	if !t.mu.TryLock() {
-		return errors.New("tailnet is in the process of starting or stopping")
-	}
-	if t.lifecycleState == LifecycleStopping || t.lifecycleState == LifecycleStopped {
-		t.mu.Unlock()
-		return errors.New("tailnet that is already stopped cannot be stopped again")
-	}
-	t.setLifecycleState(LifecycleStopping)
-	defer t.mu.Unlock()
-	defer t.setLifecycleState(LifecycleStopped)
+func (t *Tailnet) Start(ctx context.Context) error {
+	return t.currentState.Start(ctx)
+}
+
+func (t *Tailnet) stop(ctx context.Context) error {
+	t.setState(t.stopping)
 
 	t.logger.Printf("Stopping tailnet")
 
@@ -338,6 +166,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		err := t.socksProxy.Close()
 		if err != nil {
 			t.logger.Printf("failed to close SOCKS5 proxy: %v", err)
+			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
 			return err
 		}
 		t.socksProxy = nil
@@ -356,6 +185,8 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		err := t.server.Close()
 		if err != nil {
 			t.logger.Printf("failed to close tsnet server: %v", err)
+			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
+			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
 			return err
 		}
 		t.server = nil
@@ -364,18 +195,15 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	t.logger.Printf("Tailnet stopped successfully")
 
+	t.setState(t.stopped)
 	return nil
 }
 
-// Logout logs out from the tailnet and cleans up local state.
-// Note: The device may remain visible in the Tailscale admin console as "disconnected"
-// until manually deleted or it expires. This is expected Tailscale behavior.
-func (t *Tailnet) Logout(ctx context.Context) error {
-	// Ensure the server is started to get a local client
-	if t.server == nil {
-		return errors.New("tailnet is not started")
-	}
+func (t *Tailnet) Stop(ctx context.Context) error {
+	return t.currentState.Stop(ctx)
+}
 
+func (t *Tailnet) logout(ctx context.Context) error {
 	lc, err := t.server.LocalClient()
 	if err != nil {
 		t.logger.Printf("failed to get LocalClient for logout: %v", err)
@@ -392,17 +220,158 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	return nil
 }
 
-func (t *Tailnet) Dial(ctx context.Context, network, address string) (net.Conn, error) {
-	// TODO: Do we still need this lifecycle lock for Dial?
-	// Depends on the rest of tsnets and our error handling.
-	if !t.mu.TryRLock() {
-		return nil, errors.New("tailnet is in the process of starting or stopping")
-	}
-	defer t.mu.RUnlock()
+// Logout logs out from the tailnet and cleans up local state.
+// Note: The device may remain visible in the Tailscale admin console as "disconnected"
+// until manually deleted or it expires. This is expected Tailscale behavior.
+func (t *Tailnet) Logout(ctx context.Context) error {
+	return t.currentState.Logout(ctx)
+}
 
-	return t.server.Dial(ctx, network, address)
+func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	return t.currentState.Dial(ctx, network, addr)
 }
 
 func (t *Tailnet) SocksAddr() string {
 	return fmt.Sprintf("localhost:%d", t.socksPort)
+}
+
+func (t *Tailnet) MagicDNSSuffix() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.claimedMagicDNSSuffix
+}
+
+func (t *Tailnet) StateName() StateName {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.Name()
+}
+
+func (t *Tailnet) Hostname() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	// TODO: Also update this with the hostname retrieved from tailscale itself.
+	return t.userSetHostname
+}
+
+func (t *Tailnet) LoginURL() (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.LoginURL()
+}
+
+func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.Peers()
+}
+
+func (t *Tailnet) TerminalError() (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.TerminalError()
+}
+
+func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) error {
+	return t.currentState.ReactToIPNStateChange(ctx, ipnState)
+}
+
+func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
+	// Using the tailnet wide mu for now.
+	t.mu.Lock()
+
+	if t.claimedMagicDNSSuffix != "" {
+		// We have already claimed a MagicDNS suffix.
+		t.mu.Unlock()
+		return
+	}
+
+	// TODO: Handle case where the MagicDNS suffix changes while we're running.
+
+	if ipnState.MagicDNSSuffix == "" {
+		// No MagicDNS suffix to claim.
+		t.mu.Unlock()
+		return
+	}
+
+	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
+		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
+			t.logger.Println(claimErr)
+			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
+			t.terminalError = claimErr.Error()
+			t.setLockedStateNoNotify(t.hasTerminalError)
+			t.mu.Unlock()
+
+			// TODO: Persist the terminal error to disk so it survives restarts.
+
+			// Notify about the state change after unlocking to prevent holding the lock for a long time.
+			if t.broadcast != nil {
+				t.broadcast()
+			}
+			return
+		}
+
+		t.logger.Printf("failed to claim MagicDNS suffix %s: %v", ipnState.MagicDNSSuffix, err)
+		return
+	}
+
+	// Successfully claimed the MagicDNS suffix. Update our state and notify about the change.
+	t.claimedMagicDNSSuffix = ipnState.MagicDNSSuffix
+
+	// Unlock before notifying about the state change to prevent holding the lock for a long time.
+	// Ideally we can redesign the state notifier to be async.
+	t.mu.Unlock()
+
+	// Notify about the state change
+	if t.broadcast != nil {
+		t.broadcast()
+	}
+}
+
+func (t *Tailnet) maybeTransitionToNeedsLogin(ipnState IPNState) {
+	// Using the tailnet wide mu for now.
+	t.mu.Lock()
+
+	if ipnState.State == nil || *ipnState.State != ipn.NeedsLogin {
+		t.mu.Unlock()
+		return
+	}
+
+	if ipnState.BrowseToURL == nil || *ipnState.BrowseToURL == "" {
+		t.mu.Unlock()
+		return
+	}
+
+	t.loginURL = *ipnState.BrowseToURL
+
+	t.setLockedStateNoNotify(t.needsLogin)
+	t.mu.Unlock()
+
+	// Notify about the state change after unlocking to prevent holding the lock for a long time.
+	if t.broadcast != nil {
+		t.broadcast()
+	}
+}
+
+func (t *Tailnet) maybeTransitionToNeedsMachineAuth(ipnState IPNState) {
+	if ipnState.State == nil || *ipnState.State != ipn.NeedsMachineAuth {
+		return
+	}
+
+	t.setState(t.needsMachineAuth)
+}
+
+func (t *Tailnet) maybeTransitionToConnected(ipnState IPNState) {
+	if ipnState.State == nil || *ipnState.State != ipn.Running {
+		return
+	}
+
+	t.setState(t.connected)
+}
+
+func (t *Tailnet) maybeUpdatePeers(ipnState IPNState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.peers = ipnState.Peers
 }

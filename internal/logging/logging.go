@@ -12,10 +12,10 @@ import (
 
 type Logger struct {
 	base   *log.Logger
-	fields map[string]string
+	fields map[string]any
 }
 
-func New(base *log.Logger, fields map[string]string) *Logger {
+func New(base *log.Logger, fields map[string]any) *Logger {
 	if base == nil {
 		base = log.Default()
 	}
@@ -25,22 +25,22 @@ func New(base *log.Logger, fields map[string]string) *Logger {
 	}
 }
 
-func (l *Logger) With(key, value string) *Logger {
+func (l *Logger) With(key string, value any) *Logger {
 	fields := cloneFields(l.fields)
 	if fields == nil {
-		fields = map[string]string{}
+		fields = map[string]any{}
 	}
 	fields[key] = value
 	return &Logger{base: l.base, fields: fields}
 }
 
-func (l *Logger) WithFields(fields map[string]string) *Logger {
+func (l *Logger) WithFields(fields map[string]any) *Logger {
 	if len(fields) == 0 {
 		return l
 	}
 	merged := cloneFields(l.fields)
 	if merged == nil {
-		merged = map[string]string{}
+		merged = map[string]any{}
 	}
 	for key, value := range fields {
 		merged[key] = value
@@ -87,17 +87,17 @@ func (l *Logger) prefix() string {
 	for _, key := range keys {
 		builder.WriteString(key)
 		builder.WriteByte('=')
-		builder.WriteString(l.fields[key])
+		builder.WriteString(fmt.Sprintf("%v", l.fields[key]))
 		builder.WriteByte(' ')
 	}
 	return builder.String()
 }
 
-func cloneFields(fields map[string]string) map[string]string {
+func cloneFields(fields map[string]any) map[string]any {
 	if len(fields) == 0 {
 		return nil
 	}
-	copyFields := make(map[string]string, len(fields))
+	copyFields := make(map[string]any, len(fields))
 	for key, value := range fields {
 		copyFields[key] = value
 	}

@@ -2,16 +2,20 @@ package ts
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
+	"tailscale.com/tailcfg"
 )
 
 type watcher struct {
 	tailnet       *Tailnet
 	ipnBusWatcher *local.IPNBusWatcher
+	state         IPNState
 	wg            *sync.WaitGroup
 	cancel        context.CancelFunc
 	logger        *logging.Logger
@@ -21,7 +25,7 @@ func newWatcher(tailnet *Tailnet) *watcher {
 	return &watcher{
 		tailnet: tailnet,
 		wg:      &sync.WaitGroup{},
-		logger:  tailnet.logger.WithFields(map[string]string{"component": "watcher", "job": "ipn"}),
+		logger:  tailnet.logger.WithFields(map[string]any{"component": "watcher", "job": "ipn"}),
 	}
 }
 
@@ -67,12 +71,15 @@ func (w *watcher) Start() {
 			}
 
 			w.logger.Printf("Received IPN notification: %s", n.String())
-			w.tailnet.UpdateLatestState(&n)
-			w.logger.Printf("Updated tailnet state: %s", w.tailnet.LatestState().String())
+			w.state = w.state.refresh(&n)
+			w.logger.Printf("Updated IPN state: %s", w.state.String())
+			w.tailnet.ReactToIPNStateChange(ctx, w.state)
+			w.logger.Printf("Tailnet after reacting to IPN state change: %s", w.tailnet.String())
 		}
 	})
 }
 
+// TODO: Probably should return an error if Close() fails?
 func (w *watcher) Stop() {
 	if w.ipnBusWatcher != nil {
 		// TODO: Are all these needed?
@@ -85,5 +92,101 @@ func (w *watcher) Stop() {
 		w.logger.Printf("IPN watcher closed, waiting for goroutine to exit")
 		w.wg.Wait()
 		w.logger.Printf("IPN watcher stopped successfully")
+	}
+}
+
+type IPNState struct {
+	//// From Notify.*
+	// State is the current state of the Tailscale connection.
+	State *ipn.State
+	// ErrMessage, if non-nil, contains a critical error message.
+	// For State InUseOtherUser, ErrMessage is not critical and just contains the details.
+	ErrMessage *string
+	// BrowseToURL, if non-nil, UI should open a browser right now
+	BrowseToURL *string
+
+	//// From Notify.NetMap.*
+	// SelfNode is the current node's view of itself.
+	SelfNode tailcfg.NodeView
+	// MagicDNSSuffix is the MagicDNS suffix for the Tailnet, if any.
+	// This can be used for routing but will not work for shared-in nodes or if magic DNS is disabled.
+	MagicDNSSuffix string
+
+	// Peers is the list of peers in the Tailnet.
+	Peers []tailcfg.NodeView
+	// DisplayMessages are the list of health check problems for this
+	// node from the perspective of the control plane.
+	// If empty, there are no known problems from the control plane's
+	// point of view, but the node might know about its own health
+	// check problems.
+	DisplayMessages map[tailcfg.DisplayMessageID]tailcfg.DisplayMessage
+}
+
+func (s IPNState) refresh(n *ipn.Notify) IPNState {
+	if n.State != nil {
+		s.State = n.State
+	}
+	if n.ErrMessage != nil {
+		s.ErrMessage = n.ErrMessage
+	}
+	if n.BrowseToURL != nil {
+		s.BrowseToURL = n.BrowseToURL
+	}
+	if n.NetMap != nil {
+		s.SelfNode = n.NetMap.SelfNode
+		if n.NetMap.SelfNode.Valid() && n.NetMap.SelfNode.Name() != "" {
+			// TODO: Explicitly error out if magic DNS is disabled
+			// Or find a sane way to handle these cases.
+			// We might still get the proper value here but we can't connect to it.
+			// Maybe handle somewhere else?
+			magicDNSSuffix := extractMagicDNSSuffix(n.NetMap.SelfNode.Name())
+			if magicDNSSuffix != "" {
+				s.MagicDNSSuffix = magicDNSSuffix
+			}
+		}
+		s.Peers = n.NetMap.Peers
+		s.DisplayMessages = n.NetMap.DisplayMessages
+	}
+	return s
+}
+
+// Example: "host.tail-scale.ts.net." -> "tail-scale.ts.net"
+// Just removed any trailing dot and the first label.
+func extractMagicDNSSuffix(fqdn string) string {
+	fqdn = strings.TrimSuffix(fqdn, ".")
+	parts := strings.SplitN(fqdn, ".", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return ""
+}
+
+func (s IPNState) String() string {
+	var sb strings.Builder
+	sb.WriteString("IPNState{")
+	if s.State != nil {
+		fmt.Fprintf(&sb, "state=%v ", *s.State)
+	}
+	if s.ErrMessage != nil {
+		fmt.Fprintf(&sb, "err=%q ", *s.ErrMessage)
+	}
+	if s.BrowseToURL != nil {
+		fmt.Fprintf(&sb, "url=%q ", *s.BrowseToURL)
+	}
+
+	if s.SelfNode.Valid() {
+		fmt.Fprintf(&sb, "selfNode=%v ", s.SelfNode.ComputedName())
+	}
+	if len(s.Peers) > 0 {
+		fmt.Fprintf(&sb, "peers=%d ", len(s.Peers))
+	}
+	if len(s.DisplayMessages) > 0 {
+		fmt.Fprintf(&sb, "displayMessages=%d ", len(s.DisplayMessages))
+	}
+	str := sb.String()
+	if str == "IPNState{" {
+		return "IPNState{}"
+	} else {
+		return str[0:len(str)-1] + "}"
 	}
 }

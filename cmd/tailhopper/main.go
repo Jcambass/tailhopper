@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/jcambass/tailhopper/internal/logging"
+	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ts"
 	"github.com/jcambass/tailhopper/internal/web"
 )
@@ -23,11 +24,13 @@ import (
 func main() {
 	defer logging.CatchPanic(nil)
 
-	baseLogger := logging.New(log.Default(), map[string]string{})
+	baseLogger := logging.New(log.Default(), map[string]any{})
 	logging.SetDefault(baseLogger)
 	logger := baseLogger.With("component", "cmd")
 
-	registry, err := ts.NewRegistry("./tailhopper.json", baseLogger)
+	seeBroadcaster := sse.NewSSEBroadcaster(logger)
+
+	registry, err := ts.NewRegistry("./tailhopper.json", baseLogger, seeBroadcaster)
 	if err != nil {
 		logger.Fatalf("failed to initialize registry: %v", err)
 	}
@@ -40,7 +43,7 @@ func main() {
 	dashboardAddr := "127.0.0.1:" + dashboardPort
 
 	// Create dashboard server
-	dashboardSrv := web.NewServer(dashboardAddr, registry)
+	dashboardSrv := web.NewServer(dashboardAddr, registry, seeBroadcaster)
 
 	if err := dashboardSrv.Start(); err != nil {
 		logger.Fatalf("dashboard server error: %v", err)

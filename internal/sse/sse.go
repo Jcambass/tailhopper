@@ -1,4 +1,4 @@
-package web
+package sse
 
 import (
 	"context"
@@ -8,6 +8,11 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/logging"
 )
+
+type Broadcaster interface {
+	BroadcastTailnetChange(tailnetID int)
+	BroadcastGlobalChange()
+}
 
 // SSEBroadcaster manages Server-Sent Events subscriptions and broadcasts.
 type SSEBroadcaster struct {
@@ -86,18 +91,13 @@ func (b *SSEBroadcaster) Broadcast(event string) {
 	}
 }
 
-// NotifyStateChange broadcasts a state change event for a specific tailnet.
-// If tailnetID is empty, it broadcasts a global change event.
-func (b *SSEBroadcaster) NotifyStateChange(tailnetID string) {
-	if tailnetID == "" {
-		b.Broadcast("global")
-	} else {
-		b.Broadcast(fmt.Sprintf("tailnet-%s", tailnetID))
-	}
+// BroadcastTailnetChange broadcasts a tailnet-specific change event.
+func (b *SSEBroadcaster) BroadcastTailnetChange(tailnetID int) {
+	b.Broadcast(fmt.Sprintf("tailnet-%d", tailnetID))
 }
 
-// NotifyGlobalChange broadcasts a global change event (e.g., tailnet add/remove).
-func (b *SSEBroadcaster) NotifyGlobalChange() {
+// BroadcastGlobalChange broadcasts a global change event (e.g., tailnet add/remove).
+func (b *SSEBroadcaster) BroadcastGlobalChange() {
 	b.Broadcast("global")
 }
 

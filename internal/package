@@ -1,0 +1,50 @@
+
+package socks
+
+import (
+"context"
+"net"
+"testing"
+)
+
+func TestNewServer(t *testing.T) {
+mockDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+return nil, nil
+}
+
+server, err := NewServer(mockDialer, 0)
+if err != nil {
+t.Fatalf("failed to create server: %v", err)
+}
+defer server.Close()
+
+if server == nil {
+t.Fatal("expected server, got nil")
+}
+}
+
+func TestServerAddr(t *testing.T) {
+mockDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+return nil, nil
+}
+
+server, _ := NewServer(mockDialer, 0)
+defer server.Close()
+
+addr := server.Addr()
+if addr == "" {
+t.Fatal("expected non-empty address")
+}
+}
+
+func TestServerClose(t *testing.T) {
+mockDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+return nil, nil
+}
+
+server, _ := NewServer(mockDialer, 0)
+err := server.Close()
+if err != nil {
+t.Errorf("unexpected error on close: %v", err)
+}
+}
