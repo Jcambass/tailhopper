@@ -2,7 +2,11 @@ module github.com/jcambass/tailhopper
 
 go 1.26.0
 
-require tailscale.com v1.94.1
+require (
+	github.com/go-chi/chi/v5 v5.1.0
+	github.com/lmittmann/tint v1.1.3
+	tailscale.com v1.94.1
+)
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -36,7 +40,6 @@ require (
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.0 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
-	github.com/lmittmann/tint v1.1.3 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
