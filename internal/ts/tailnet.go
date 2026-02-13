@@ -86,9 +86,91 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 	return t
 }
 
+// //
+// Always available to call
+// //
 func (t *Tailnet) String() string {
 	return fmt.Sprintf("Tailnet{id: %d, state: %s, claimedMagicDNSSuffix: %s, terminalError: %s, socksPort: %d, userSetHostname: %s, peers: %d}", t.id, t.currentState.Name(), t.claimedMagicDNSSuffix, t.terminalError, t.socksPort, t.userSetHostname, len(t.peers))
 }
+
+func (t *Tailnet) ID() int {
+	return t.id
+}
+
+func (t *Tailnet) SocksAddr() string {
+	return fmt.Sprintf("localhost:%d", t.socksPort)
+}
+
+// //
+// Indirectly based on the current state of the tailnet but always callable.
+// //
+func (t *Tailnet) MagicDNSSuffix() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.claimedMagicDNSSuffix
+}
+
+// //
+// Based on the current state of the tailnet
+// //
+func (t *Tailnet) StateName() StateName {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.Name()
+}
+
+func (t *Tailnet) Start(ctx context.Context) error {
+	return t.currentState.Start(ctx)
+}
+
+func (t *Tailnet) Stop(ctx context.Context) error {
+	return t.currentState.Stop(ctx)
+}
+
+// Logout logs out from the tailnet and cleans up local state.
+// Note: The device may remain visible in the Tailscale admin console as "disconnected"
+// until manually deleted or it expires. This is expected Tailscale behavior.
+func (t *Tailnet) Logout(ctx context.Context) error {
+	return t.currentState.Logout(ctx)
+}
+
+func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	return t.currentState.Dial(ctx, network, addr)
+}
+
+func (t *Tailnet) Hostname() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	// TODO: Also update this with the hostname retrieved from tailscale itself.
+	return t.userSetHostname
+}
+
+func (t *Tailnet) LoginURL() (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.LoginURL()
+}
+
+func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.Peers()
+}
+
+func (t *Tailnet) TerminalError() (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentState.TerminalError()
+}
+
+// Not using a log since the functions inside ReactToIPNStateChange themself lock when needed.
+func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) error {
+	return t.currentState.ReactToIPNStateChange(ctx, ipnState)
+}
+
+////
+// Internal state management functions that should only be called by the State implementations.
+////
 
 func (t *Tailnet) setState(state State) {
 	t.mu.Lock()
@@ -106,10 +188,6 @@ func (t *Tailnet) setState(state State) {
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
 	t.logger.Printf("set state to %s", string(state.Name()))
-}
-
-func (t *Tailnet) ID() int {
-	return t.id
 }
 
 func (t *Tailnet) start(ctx context.Context) error {
@@ -161,10 +239,6 @@ func (t *Tailnet) start(ctx context.Context) error {
 	return nil
 }
 
-func (t *Tailnet) Start(ctx context.Context) error {
-	return t.currentState.Start(ctx)
-}
-
 func (t *Tailnet) stop(ctx context.Context) error {
 	t.setState(t.stopping)
 
@@ -209,10 +283,6 @@ func (t *Tailnet) stop(ctx context.Context) error {
 	return nil
 }
 
-func (t *Tailnet) Stop(ctx context.Context) error {
-	return t.currentState.Stop(ctx)
-}
-
 // logout logs the machine out of the tailnet. This is different from stop, which just stops the local tsnet server but leaves the machine authenticated with the tailnet.
 // After logout, the machine will no longer be able to connect to the tailnet until it's logged in again.
 // logout will start the server if it's not already started, then log out from the tailnet.
@@ -247,62 +317,6 @@ func (t *Tailnet) logout(ctx context.Context) error {
 
 	t.logger.Printf("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
 	return nil
-}
-
-// Logout logs out from the tailnet and cleans up local state.
-// Note: The device may remain visible in the Tailscale admin console as "disconnected"
-// until manually deleted or it expires. This is expected Tailscale behavior.
-func (t *Tailnet) Logout(ctx context.Context) error {
-	return t.currentState.Logout(ctx)
-}
-
-func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	return t.currentState.Dial(ctx, network, addr)
-}
-
-func (t *Tailnet) SocksAddr() string {
-	return fmt.Sprintf("localhost:%d", t.socksPort)
-}
-
-func (t *Tailnet) MagicDNSSuffix() string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.claimedMagicDNSSuffix
-}
-
-func (t *Tailnet) StateName() StateName {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.Name()
-}
-
-func (t *Tailnet) Hostname() string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	// TODO: Also update this with the hostname retrieved from tailscale itself.
-	return t.userSetHostname
-}
-
-func (t *Tailnet) LoginURL() (string, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.LoginURL()
-}
-
-func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.Peers()
-}
-
-func (t *Tailnet) TerminalError() (string, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.TerminalError()
-}
-
-func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) error {
-	return t.currentState.ReactToIPNStateChange(ctx, ipnState)
 }
 
 func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {

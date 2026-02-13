@@ -2,6 +2,7 @@
 package pac
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -31,11 +32,16 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 
 	for _, t := range tailnets {
 		suffix := t.MagicDNSSuffix()
+		// Skip tailnets without a claimed MagicDNS suffix
 		if suffix == "" {
-			// If the tailnet doesn't have a magic DNS suffix, skip it in the PAC file.
 			continue
 		}
 
+		suffixes = append(suffixes, suffix)
+		socksAddr := t.SocksAddr()
+
+		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", suffix))
+		sb.WriteString(fmt.Sprintf("        return \"SOCKS5 %s; SOCKS %s; DIRECT\";\n", socksAddr, socksAddr))
 		sb.WriteString("    }\n")
 	}
 
