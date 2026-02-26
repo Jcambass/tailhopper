@@ -43,7 +43,15 @@ func (w *watcher) Start() {
 		// Wait a moment for tsnet to initialize
 		//time.Sleep(500 * time.Millisecond)
 
-		lc, err := w.tailnet.server.LocalClient()
+		w.tailnet.mu.RLock()
+		server := w.tailnet.server
+		w.tailnet.mu.RUnlock()
+		if server == nil {
+			w.logger.Error("failed to get LocalClient for watcher", slog.String("error", "tsnet server is nil"))
+			return
+		}
+
+		lc, err := server.LocalClient()
 		if err != nil {
 			w.logger.Error("failed to get LocalClient for watcher", slog.Any("error", err))
 			return
