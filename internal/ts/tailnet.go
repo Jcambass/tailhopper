@@ -346,6 +346,18 @@ func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, err
 	return server.Dial(ctx, network, addr)
 }
 
+// tryStateTransitionLocked attempts a series of state transitions in order,
+// returning true after the first successful transition. This ensures that only
+// one state transition can occur per IPN state change event (mutually exclusive).
+// Requires mu to be held by caller.
+func (t *Tailnet) tryStateTransitionLocked(ipnState IPNState, transitions ...func(IPNState) bool) bool {
+	for _, transition := range transitions {
+		if transition(ipnState) {
+			return true
+		}
+	}
+	return false
+}
 func (t *Tailnet) Hostname() string {
 	// TODO: Also update this with the hostname retrieved from tailscale itself.
 	return t.userSetHostname
@@ -391,36 +403,61 @@ func (t *Tailnet) TerminalError() (string, error) {
 }
 
 func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) {
-	t.mu.RLock()
-	state := t.currentState
-	t.mu.RUnlock()
+	t.log().Debug("Reacting to IPN state change", slog.String("ipn_state", ipnState.String()))
 
-	t.log().Debug("Reacting to IPN state change", slog.String("state", string(state)), slog.String("ipn_state", ipnState.String()))
+	// Watcher path: hold mu for the entire decision to ensure atomicity.
+	t.mu.Lock()
+	state := t.currentState
+	changed := false
 
 	switch state {
 	case ConnectedState:
-		t.maybeClaimMagicDNSSuffix(ipnState)
-		t.maybeTransitionToNeedsLogin(ipnState)
-		t.maybeTransitionToNeedsMachineAuth(ipnState)
-		t.updatePeers(ipnState)
-		return
+		// Additive: claim magic DNS suffix if needed (happens independently of state transitions)
+		changed = t.maybeClaimMagicDNSSuffixLocked(ipnState) || changed
+
+		// Mutually exclusive: try state transitions (only one can happen per event)
+		changed = t.tryStateTransitionLocked(ipnState,
+			t.maybeTransitionToNeedsLoginLocked,
+			t.maybeTransitionToNeedsMachineAuthLocked,
+		) || changed
+
+		// Additive: update peers (always happens, independent of state changes)
+		changed = t.updatePeersLocked(ipnState) || changed
+
 	case StartedState:
-		t.maybeTransitionToNeedsLogin(ipnState)
-		t.maybeTransitionToNeedsMachineAuth(ipnState)
-		t.maybeTransitionToConnected(ipnState)
-		return
+		// Mutually exclusive: try state transitions
+		changed = t.tryStateTransitionLocked(ipnState,
+			t.maybeTransitionToNeedsLoginLocked,
+			t.maybeTransitionToNeedsMachineAuthLocked,
+			t.maybeTransitionToConnectedLocked,
+		)
+
 	case NeedsLoginState:
-		t.maybeTransitionToNeedsMachineAuth(ipnState)
-		t.maybeTransitionToConnected(ipnState)
-		return
+		// Mutually exclusive: try state transitions
+		changed = t.tryStateTransitionLocked(ipnState,
+			t.maybeTransitionToNeedsMachineAuthLocked,
+			t.maybeTransitionToConnectedLocked,
+		)
+
 	case NeedsMachineAuthState:
-		t.maybeClaimMagicDNSSuffix(ipnState)
-		t.maybeTransitionToNeedsLogin(ipnState)
-		t.maybeTransitionToConnected(ipnState)
-		return
+		// Additive: claim magic DNS suffix if needed (happens independently of state transitions)
+		changed = t.maybeClaimMagicDNSSuffixLocked(ipnState) || changed
+
+		// Mutually exclusive: try state transitions (only one can happen per event)
+		changed = t.tryStateTransitionLocked(ipnState,
+			t.maybeTransitionToNeedsLoginLocked,
+			t.maybeTransitionToConnectedLocked,
+		) || changed
+
 	default:
 		// Simply ignore IPN state changes in any other state.
-		return
+	}
+
+	t.mu.Unlock()
+
+	// Notify after releasing lock to keep lock time minimal.
+	if changed {
+		t.notify()
 	}
 }
 
@@ -453,88 +490,73 @@ func (t *Tailnet) log() *slog.Logger {
 	return t.logger
 }
 
-func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
+// Locked helpers below: require mu to be held by caller.
+
+func (t *Tailnet) maybeClaimMagicDNSSuffixLocked(ipnState IPNState) bool {
 	// TODO: Handle case where the MagicDNS suffix changes while we're running.
-
-	if ipnState.MagicDNSSuffix == "" {
-		// No MagicDNS suffix to claim.
-		return
-	}
-
-	t.mu.RLock()
-	alreadyClaimed := t.claimedMagicDNSSuffix != ""
-	t.mu.RUnlock()
-	if alreadyClaimed {
-		return
+	if ipnState.MagicDNSSuffix == "" || t.claimedMagicDNSSuffix != "" {
+		return false
 	}
 
 	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
 		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
 			t.log().Error("magic DNS suffix claim error", slog.Any("error", claimErr))
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
-			t.mu.Lock()
 			t.terminalError = claimErr.Error()
 			t.currentState = HasTerminalErrorState
-			t.mu.Unlock()
-			t.notify()
-
-			// TODO: Persist the terminal error to disk so it survives restarts.
-			return
+			return true
 		}
 
 		t.log().Error("failed to claim MagicDNS suffix", slog.String("suffix", ipnState.MagicDNSSuffix), slog.Any("error", err))
-		return
+		return false
 	}
 
-	// Successfully claimed the MagicDNS suffix. Update our state and notify about the change.
-	t.mu.Lock()
+	// Successfully claimed the MagicDNS suffix.
 	t.claimedMagicDNSSuffix = ipnState.MagicDNSSuffix
-	t.mu.Unlock()
 
 	// Update logger with the new suffix
 	t.logMu.Lock()
-	t.logger = t.logger.With("magic_dns_suffix", ipnState.MagicDNSSuffix)
+	t.logger = t.logger.With(slog.String("magic_dns_suffix", ipnState.MagicDNSSuffix))
 	t.logMu.Unlock()
 
-	t.notify()
+	return true
 }
 
-func (t *Tailnet) maybeTransitionToNeedsLogin(ipnState IPNState) {
+func (t *Tailnet) maybeTransitionToNeedsLoginLocked(ipnState IPNState) bool {
 	if ipnState.State == nil || *ipnState.State != ipn.NeedsLogin {
-		return
+		return false
 	}
 
 	if ipnState.BrowseToURL == nil || *ipnState.BrowseToURL == "" {
-		return
+		return false
 	}
 
-	t.mu.Lock()
 	t.loginURL = *ipnState.BrowseToURL
 	t.currentState = NeedsLoginState
-	t.mu.Unlock()
-	t.notify()
+	return true
 }
 
-func (t *Tailnet) maybeTransitionToNeedsMachineAuth(ipnState IPNState) {
+func (t *Tailnet) maybeTransitionToNeedsMachineAuthLocked(ipnState IPNState) bool {
 	if ipnState.State == nil || *ipnState.State != ipn.NeedsMachineAuth {
-		return
+		return false
 	}
 
-	t.setState(NeedsMachineAuthState)
+	t.currentState = NeedsMachineAuthState
+	return true
 }
 
-func (t *Tailnet) maybeTransitionToConnected(ipnState IPNState) {
+func (t *Tailnet) maybeTransitionToConnectedLocked(ipnState IPNState) bool {
 	if ipnState.State == nil || *ipnState.State != ipn.Running {
-		return
+		return false
 	}
 
-	t.setState(ConnectedState)
+	t.currentState = ConnectedState
+	return true
 }
 
-func (t *Tailnet) updatePeers(ipnState IPNState) {
-	t.mu.Lock()
+func (t *Tailnet) updatePeersLocked(ipnState IPNState) bool {
 	t.peers = ipnState.Peers
-	t.mu.Unlock()
+	return true
 }
 
 func (t *Tailnet) tsnetLogf(level slog.Level) func(string, ...any) {
