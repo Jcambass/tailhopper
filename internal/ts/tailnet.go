@@ -346,18 +346,6 @@ func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, err
 	return server.Dial(ctx, network, addr)
 }
 
-// tryStateTransitionLocked attempts a series of state transitions in order,
-// returning true after the first successful transition. This ensures that only
-// one state transition can occur per IPN state change event (mutually exclusive).
-// Requires mu to be held by caller.
-func (t *Tailnet) tryStateTransitionLocked(ipnState IPNState, transitions ...func(IPNState) bool) bool {
-	for _, transition := range transitions {
-		if transition(ipnState) {
-			return true
-		}
-	}
-	return false
-}
 func (t *Tailnet) Hostname() string {
 	// TODO: Also update this with the hostname retrieved from tailscale itself.
 	return t.userSetHostname
@@ -408,46 +396,46 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 	// Watcher path: hold mu for the entire decision to ensure atomicity.
 	t.mu.Lock()
 	state := t.currentState
-	changed := false
+	var changed bool
 
 	switch state {
 	case ConnectedState:
-		// Additive: claim magic DNS suffix if needed (happens independently of state transitions)
-		changed = t.maybeClaimMagicDNSSuffixLocked(ipnState) || changed
-
-		// Mutually exclusive: try state transitions (only one can happen per event)
-		changed = t.tryStateTransitionLocked(ipnState,
-			t.maybeTransitionToNeedsLoginLocked,
-			t.maybeTransitionToNeedsMachineAuthLocked,
-		) || changed
-
-		// Additive: update peers (always happens, independent of state changes)
-		changed = t.updatePeersLocked(ipnState) || changed
+		changed = t.ProcessIPN(ipnState).
+			Always(
+				t.maybeClaimMagicDNSSuffixLocked,
+				t.updatePeersLocked,
+			).
+			OneOf(
+				t.maybeTransitionToNeedsLoginLocked,
+				t.maybeTransitionToNeedsMachineAuthLocked,
+			).
+			Process()
 
 	case StartedState:
-		// Mutually exclusive: try state transitions
-		changed = t.tryStateTransitionLocked(ipnState,
-			t.maybeTransitionToNeedsLoginLocked,
-			t.maybeTransitionToNeedsMachineAuthLocked,
-			t.maybeTransitionToConnectedLocked,
-		)
+		changed = t.ProcessIPN(ipnState).
+			OneOf(
+				t.maybeTransitionToNeedsLoginLocked,
+				t.maybeTransitionToNeedsMachineAuthLocked,
+				t.maybeTransitionToConnectedLocked,
+			).
+			Process()
 
 	case NeedsLoginState:
-		// Mutually exclusive: try state transitions
-		changed = t.tryStateTransitionLocked(ipnState,
-			t.maybeTransitionToNeedsMachineAuthLocked,
-			t.maybeTransitionToConnectedLocked,
-		)
+		changed = t.ProcessIPN(ipnState).
+			OneOf(
+				t.maybeTransitionToNeedsMachineAuthLocked,
+				t.maybeTransitionToConnectedLocked,
+			).
+			Process()
 
 	case NeedsMachineAuthState:
-		// Additive: claim magic DNS suffix if needed (happens independently of state transitions)
-		changed = t.maybeClaimMagicDNSSuffixLocked(ipnState) || changed
-
-		// Mutually exclusive: try state transitions (only one can happen per event)
-		changed = t.tryStateTransitionLocked(ipnState,
-			t.maybeTransitionToNeedsLoginLocked,
-			t.maybeTransitionToConnectedLocked,
-		) || changed
+		changed = t.ProcessIPN(ipnState).
+			Always(t.maybeClaimMagicDNSSuffixLocked).
+			OneOf(
+				t.maybeTransitionToNeedsLoginLocked,
+				t.maybeTransitionToConnectedLocked,
+			).
+			Process()
 
 	default:
 		// Simply ignore IPN state changes in any other state.
