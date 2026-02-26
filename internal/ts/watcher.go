@@ -14,19 +14,21 @@ import (
 )
 
 type watcher struct {
-	tailnet       *Tailnet
 	ipnBusWatcher *local.IPNBusWatcher
 	state         IPNState
 	wg            *sync.WaitGroup
 	cancel        context.CancelFunc
 	logger        *slog.Logger
+	localClient   *local.Client
+	onState       func(context.Context, IPNState)
 }
 
-func newWatcher(tailnet *Tailnet) *watcher {
+func newWatcher(localClient *local.Client, onState func(context.Context, IPNState), tailnetID int) *watcher {
 	return &watcher{
-		tailnet: tailnet,
-		wg:      &sync.WaitGroup{},
-		logger:  slog.Default().With("component", "watcher", "tailnet_id", tailnet.id),
+		wg:          &sync.WaitGroup{},
+		logger:      slog.Default().With(slog.String("component", "watcher"), slog.Int("tailnet_id", tailnetID)),
+		localClient: localClient,
+		onState:     onState,
 	}
 }
 
@@ -43,23 +45,14 @@ func (w *watcher) Start() {
 		// Wait a moment for tsnet to initialize
 		//time.Sleep(500 * time.Millisecond)
 
-		w.tailnet.mu.RLock()
-		server := w.tailnet.server
-		w.tailnet.mu.RUnlock()
-		if server == nil {
-			w.logger.Error("failed to get LocalClient for watcher", slog.String("error", "tsnet server is nil"))
-			return
-		}
-
-		lc, err := server.LocalClient()
-		if err != nil {
-			w.logger.Error("failed to get LocalClient for watcher", slog.Any("error", err))
+		if w.localClient == nil {
+			w.logger.Error("failed to get LocalClient for watcher", slog.String("error", "local client is nil"))
 			return
 		}
 
 		// TODO: Use NotifyWatchEngineUpdates?
 		// TODO: Use NotifyInitialHealthState?
-		watcher, err := lc.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
+		watcher, err := w.localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
 		if err != nil {
 			w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
 			return
@@ -80,8 +73,9 @@ func (w *watcher) Start() {
 			w.logger.Debug("Received IPN notification", slog.String("notification", n.String()))
 			w.state = w.state.refresh(&n)
 			w.logger.Debug("Updated IPN state", slog.String("state", w.state.String()))
-			w.tailnet.ReactToIPNStateChange(ctx, w.state)
-			w.logger.Debug("Tailnet after reacting to IPN state change", slog.String("tailnet", w.tailnet.String()))
+			if w.onState != nil {
+				w.onState(ctx, w.state)
+			}
 		}
 	})
 }

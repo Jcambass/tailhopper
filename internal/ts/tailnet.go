@@ -312,11 +312,12 @@ func (t *Tailnet) TerminalError() (string, error) {
 	}
 }
 
-// Not using a log since the functions inside ReactToIPNStateChange themself lock when needed.
-func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) error {
+func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) {
 	t.mu.RLock()
 	state := t.currentState
 	t.mu.RUnlock()
+
+	t.log().Debug("Reacting to IPN state change", slog.String("state", string(state)), slog.String("ipn_state", ipnState.String()))
 
 	switch state {
 	case ConnectedState:
@@ -324,26 +325,27 @@ func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		t.maybeTransitionToNeedsLogin(ipnState)
 		t.maybeTransitionToNeedsMachineAuth(ipnState)
 		t.maybeUpdatePeers(ipnState)
-		return nil
+		return
 	case StartedState:
 		t.maybeTransitionToNeedsLogin(ipnState)
 		t.maybeTransitionToNeedsMachineAuth(ipnState)
 		t.maybeTransitionToConnected(ipnState)
-		return nil
+		return
 	case NeedsLoginState:
 		t.maybeTransitionToNeedsMachineAuth(ipnState)
 		t.maybeTransitionToConnected(ipnState)
-		return nil
+		return
 	case NeedsMachineAuthState:
 		t.maybeClaimMagicDNSSuffix(ipnState)
 		t.maybeTransitionToNeedsLogin(ipnState)
 		t.maybeTransitionToConnected(ipnState)
-		return nil
+		return
 	case StoppedState, StartingState, StoppingState, HasTerminalErrorState, LoggingOutState:
 		// Simply ignore IPN state changes in these states.
-		return nil
+		return
 	default:
-		return errors.New("unable to react to IPN state change: unknown state")
+		err := errors.New("unable to react to IPN state change: unknown state")
+		t.log().Error("unknown tailnet state during IPN reaction", slog.String("state", string(state)), slog.Any("error", err))
 	}
 }
 
@@ -422,9 +424,24 @@ func (t *Tailnet) start(ctx context.Context) error {
 		return err
 	}
 
+	lc, err := server.LocalClient()
+	if err != nil {
+		t.log().Error("failed to get LocalClient for watcher", slog.Any("error", err))
+		closeErr := socksProxy.Close()
+		if closeErr != nil {
+			t.log().Error("failed to close SOCKS5 proxy after LocalClient failure", slog.Any("error", closeErr))
+		}
+		err = server.Close()
+		if err != nil {
+			t.log().Error("failed to close tsnet server after LocalClient failure", slog.Any("error", err))
+		}
+		t.setState(StoppedState)
+		return err
+	}
+
 	// start IPN watcher to observe state changes
 	t.log().Debug("Starting IPN watcher")
-	watcher := newWatcher(t)
+	watcher := newWatcher(lc, t.reactToIPNStateChange, t.id)
 	watcher.Start()
 
 	// Atomically update all fields under mu
