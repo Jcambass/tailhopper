@@ -31,7 +31,7 @@ type Tailnet struct {
 	// We use two separate locks, commandMu and dataMu.
 	// 1. Executing commands requires holding the commandMu write lock, which ensures that only one command can be executing at a time.
 	// 2. Executing state or status updates requires holding a Read Lock on commandMu (to ensure no commands are executing) and a write lock on dataMu (to ensure the state is not changing while we're reading it).
-	// 4. Reading state or status requires holding a Read Lock on dataMu, but does not require holding commandMu. This does mean that a command might be in-flight and state fields might not be consistent with each other!
+	// 3. Reading state or status requires holding a Read Lock on dataMu, but does not require holding commandMu. This does mean that a command might be in-flight and state fields might not be consistent with each other!
 	//    This is a tradeoff to allow the UI to read state without being blocked by commands, but it means that the UI needs to be resilient to potentially inconsistent state.
 	//    If the code does rely on consistency between fields, it should acquire the commandMu read lock as well to ensure that no commands are in-flight that might be changing the state.
 	//    We might revisit this decision in the future if it proves to be too difficult to work with, but for now it allows for more responsive UI updates without being blocked by long-running commands.
@@ -42,10 +42,6 @@ type Tailnet struct {
 	commandMu sync.RWMutex
 
 	// dataMu protects all mutable state fields that are relevant to the current state of the tailnet.
-	// This includes fields that are updated based on IPN state changes, as well as fields that are set on start and cleared on stop.
-	// When aquiring this lock, you need to decide if you also need to acquire the commandMu for any operations you're doing, and acquire locks in the correct order to avoid deadlocks.
-	// You never want to acquire the write lock for dataMu without holding the commandMu, but it's ok to acquire the read lock for dataMu without holding the commandMu as long as you understand
-	// that the state may change underneath you and you're ok with that for the operations you're doing.
 	// Lock order: commandMu -> dataMu
 	dataMu sync.RWMutex
 
@@ -245,12 +241,10 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	t.log().Debug("Stopping tailnet")
 
-	// Read fields under commandMu to get local copies for shutdown
 	server := t.server
 	watcher := t.watcher
 	socksProxy := t.socksProxy
 
-	// Do expensive I/O without holding dataMu (only opMu is held)
 	if socksProxy != nil {
 		t.log().Debug("Stopping SOCKS5 proxy")
 		err := socksProxy.Close()
@@ -282,7 +276,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	t.log().Debug("Tailnet stopped successfully")
 
-	// Atomically clear all fields under commandMu
 	t.server = nil
 	t.watcher = nil
 	t.socksProxy = nil
