@@ -121,26 +121,86 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	switch state {
 	case StoppedState:
-		return t.start(ctx)
-	case ConnectedState:
-		return errors.New("unable to start: tailnet is already connected")
-	case StartedState:
-		return errors.New("unable to start: tailnet is already started")
-	case StartingState:
-		return errors.New("unable to start: tailnet is already starting")
-	case StoppingState:
-		return errors.New("unable to start: tailnet is stopping")
-	case NeedsLoginState:
-		return errors.New("unable to start: tailnet is already started (needs login)")
-	case NeedsMachineAuthState:
-		return errors.New("unable to start: tailnet is already started (needs machine auth)")
-	case HasTerminalErrorState:
-		return errors.New("unable to start: tailnet is already started (has terminal error)")
-	case LoggingOutState:
-		return errors.New("unable to start: tailnet is logging out")
+		// Allow starting
 	default:
-		return errors.New("unable to start: unknown state")
+		return fmt.Errorf("unable to start: tailnet is in state %s", state)
 	}
+
+	// Set starting state
+	t.setState(StartingState)
+
+	t.log().Debug("Starting tailnet")
+
+	// Do expensive I/O without holding mu
+	// Snapshot mutable fields under lock.
+	stateDir := t.tsnetStateDir
+	hostname := t.userSetHostname
+
+	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
+	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
+	if err != nil {
+		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
+		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
+		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
+		t.setState(StoppedState)
+		return err
+	}
+	socksProxy.Start()
+
+	// Asynchronously start the server
+	t.log().Debug("Starting tsnet server")
+
+	server := &tsnet.Server{
+		Dir:      stateDir,
+		Hostname: hostname,
+		UserLogf: t.tsnetLogf(slog.LevelInfo),
+		Logf:     t.tsnetLogf(slog.LevelDebug),
+	}
+
+	err = server.Start()
+	if err != nil {
+		t.log().Error("failed to start tsnet server", slog.Any("error", err))
+		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
+
+		closeErr := socksProxy.Close()
+		if closeErr != nil {
+			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.Any("error", closeErr))
+		}
+		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
+		t.setState(StoppedState)
+		return err
+	}
+
+	lc, err := server.LocalClient()
+	if err != nil {
+		t.log().Error("failed to get LocalClient for watcher", slog.Any("error", err))
+		closeErr := socksProxy.Close()
+		if closeErr != nil {
+			t.log().Error("failed to close SOCKS5 proxy after LocalClient failure", slog.Any("error", closeErr))
+		}
+		err = server.Close()
+		if err != nil {
+			t.log().Error("failed to close tsnet server after LocalClient failure", slog.Any("error", err))
+		}
+		t.setState(StoppedState)
+		return err
+	}
+
+	// start IPN watcher to observe state changes
+	t.log().Debug("Starting IPN watcher")
+	watcher := newWatcher(lc, t.reactToIPNStateChange, t.id)
+	watcher.Start()
+
+	// Atomically update all fields under mu
+	t.mu.Lock()
+	t.server = server
+	t.watcher = watcher
+	t.socksProxy = socksProxy
+	t.mu.Unlock()
+
+	t.setState(StartedState)
+
+	return nil
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
@@ -149,22 +209,79 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	t.mu.RUnlock()
 
 	switch state {
-	case StoppedState:
-		return errors.New("unable to stop: tailnet is already stopped")
-	case StoppingState:
-		return errors.New("unable to stop: tailnet is already stopping")
-	case LoggingOutState:
-		return errors.New("unable to stop: tailnet is logging out")
 	case ConnectedState, StartedState, StartingState, NeedsLoginState, NeedsMachineAuthState, HasTerminalErrorState:
-		return t.stop(ctx)
+		// Allow stopping
 	default:
-		return errors.New("unable to stop: unknown state")
+		return fmt.Errorf("unable to stop: tailnet is in state %s", state)
 	}
+
+	// Set stopping state
+	t.setState(StoppingState)
+
+	t.log().Debug("Stopping tailnet")
+
+	// Read fields under mu to get local copies for shutdown
+	t.mu.RLock()
+	server := t.server
+	watcher := t.watcher
+	socksProxy := t.socksProxy
+	t.mu.RUnlock()
+
+	// Do expensive I/O without holding mu (only opMu is held)
+	if socksProxy != nil {
+		t.log().Debug("Stopping SOCKS5 proxy")
+		err := socksProxy.Close()
+		if err != nil {
+			t.log().Error("failed to close SOCKS5 proxy", slog.Any("error", err))
+			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
+			t.setState(StoppedState)
+			return err
+		}
+		t.log().Debug("SOCKS5 proxy stopped")
+	}
+
+	if watcher != nil {
+		t.log().Debug("Stopping watcher")
+		watcher.Stop()
+		t.log().Debug("Watcher stopped")
+	}
+
+	if server != nil {
+		t.log().Debug("Stopping tsnet server")
+		err := server.Close()
+		if err != nil {
+			t.log().Error("failed to close tsnet server", slog.Any("error", err))
+			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
+			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
+			t.setState(StoppedState)
+			return err
+		}
+		t.log().Debug("tsnet server stopped")
+	}
+
+	t.log().Debug("Tailnet stopped successfully")
+
+	// Atomically clear all fields under mu
+	t.mu.Lock()
+	t.server = nil
+	t.watcher = nil
+	t.socksProxy = nil
+	t.mu.Unlock()
+
+	t.setState(StoppedState)
+
+	return nil
 }
 
 // Logout logs out from the tailnet and cleans up local state.
 // Note: The device may remain visible in the Tailscale admin console as "disconnected"
 // until manually deleted or it expires. This is expected Tailscale behavior.
+//
+// This is different from stop, which just stops the local tsnet server but leaves the machine authenticated with the tailnet.
+// After logout, the machine will no longer be able to connect to the tailnet until it's logged in again.
+// logout will start the server if it's not already started, then log out from the tailnet.
+// During all of this we stay in the LoggingOut state.
+// No matter what happens, we transition to the Stopped state at the end, since if logout is successful we're logged out and if logout fails we're in a bad state and stopping is the safest option.
 func (t *Tailnet) Logout(ctx context.Context) error {
 	t.mu.RLock()
 	state := t.currentState
@@ -174,17 +291,54 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	case NeedsLoginState:
 		// Logout is a no-op in the needs login state since the user is already effectively logged out.
 		return nil
-	case StartingState:
-		return errors.New("unable to logout: tailnet is starting")
-	case StoppingState:
-		return errors.New("unable to logout: tailnet is stopping")
-	case LoggingOutState:
-		return errors.New("unable to logout: tailnet is already logging out")
 	case ConnectedState, StoppedState, StartedState, NeedsMachineAuthState, HasTerminalErrorState:
-		return t.logout(ctx)
+		// Allow logout
 	default:
-		return errors.New("unable to logout: unknown state")
+		return fmt.Errorf("unable to logout: tailnet is in state %s", state)
 	}
+
+	// Set logging out state
+	t.setState(LoggingOutState)
+
+	// Ensure we transition to stopped state at the end
+	defer func() {
+		t.setState(StoppedState)
+	}()
+
+	// Read server under mu
+	t.mu.RLock()
+	server := t.server
+	t.mu.RUnlock()
+	stateDir := t.tsnetStateDir
+	hostname := t.userSetHostname
+
+	// Create server if needed (outside mu)
+	if server == nil {
+		server = &tsnet.Server{
+			Dir:      stateDir,
+			Hostname: hostname,
+			UserLogf: t.tsnetLogf(slog.LevelInfo),
+			Logf:     t.tsnetLogf(slog.LevelDebug),
+		}
+	}
+
+	// Do expensive I/O without holding mu (only opMu is held)
+	lc, err := server.LocalClient()
+	if err != nil {
+		t.log().Error("failed to get LocalClient for logout", slog.Any("error", err))
+		return err
+	}
+
+	t.log().Debug("Logging out from tailnet")
+
+	// TODO: Does logout auto close the server?
+	if err := lc.Logout(ctx); err != nil {
+		t.log().Error("failed to logout", slog.Any("error", err))
+		return err
+	}
+
+	t.log().Debug("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
+	return nil
 }
 
 func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -324,7 +478,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		t.maybeClaimMagicDNSSuffix(ipnState)
 		t.maybeTransitionToNeedsLogin(ipnState)
 		t.maybeTransitionToNeedsMachineAuth(ipnState)
-		t.maybeUpdatePeers(ipnState)
+		t.updatePeers(ipnState)
 		return
 	case StartedState:
 		t.maybeTransitionToNeedsLogin(ipnState)
@@ -376,193 +530,6 @@ func (t *Tailnet) log() *slog.Logger {
 	t.logMu.RLock()
 	defer t.logMu.RUnlock()
 	return t.logger
-}
-
-func (t *Tailnet) start(ctx context.Context) error {
-	// Set starting state
-	t.setState(StartingState)
-
-	t.log().Debug("Starting tailnet")
-
-	// Do expensive I/O without holding mu
-	// Snapshot mutable fields under lock.
-	stateDir := t.tsnetStateDir
-	hostname := t.userSetHostname
-
-	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
-	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
-	if err != nil {
-		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
-		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
-		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
-		t.setState(StoppedState)
-		return err
-	}
-	socksProxy.Start()
-
-	// Asynchronously start the server
-	t.log().Debug("Starting tsnet server")
-
-	server := &tsnet.Server{
-		Dir:      stateDir,
-		Hostname: hostname,
-		UserLogf: t.tsnetLogf(slog.LevelInfo),
-		Logf:     t.tsnetLogf(slog.LevelDebug),
-	}
-
-	err = server.Start()
-	if err != nil {
-		t.log().Error("failed to start tsnet server", slog.Any("error", err))
-		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
-
-		closeErr := socksProxy.Close()
-		if closeErr != nil {
-			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.Any("error", closeErr))
-		}
-		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
-		t.setState(StoppedState)
-		return err
-	}
-
-	lc, err := server.LocalClient()
-	if err != nil {
-		t.log().Error("failed to get LocalClient for watcher", slog.Any("error", err))
-		closeErr := socksProxy.Close()
-		if closeErr != nil {
-			t.log().Error("failed to close SOCKS5 proxy after LocalClient failure", slog.Any("error", closeErr))
-		}
-		err = server.Close()
-		if err != nil {
-			t.log().Error("failed to close tsnet server after LocalClient failure", slog.Any("error", err))
-		}
-		t.setState(StoppedState)
-		return err
-	}
-
-	// start IPN watcher to observe state changes
-	t.log().Debug("Starting IPN watcher")
-	watcher := newWatcher(lc, t.reactToIPNStateChange, t.id)
-	watcher.Start()
-
-	// Atomically update all fields under mu
-	t.mu.Lock()
-	t.server = server
-	t.watcher = watcher
-	t.socksProxy = socksProxy
-	t.mu.Unlock()
-
-	t.setState(StartedState)
-
-	return nil
-}
-
-func (t *Tailnet) stop(ctx context.Context) error {
-	// Set stopping state
-	t.setState(StoppingState)
-
-	t.log().Debug("Stopping tailnet")
-
-	// Read fields under mu to get local copies for shutdown
-	t.mu.RLock()
-	server := t.server
-	watcher := t.watcher
-	socksProxy := t.socksProxy
-	t.mu.RUnlock()
-
-	// Do expensive I/O without holding mu (only opMu is held)
-	if socksProxy != nil {
-		t.log().Debug("Stopping SOCKS5 proxy")
-		err := socksProxy.Close()
-		if err != nil {
-			t.log().Error("failed to close SOCKS5 proxy", slog.Any("error", err))
-			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
-			t.setState(StoppedState)
-			return err
-		}
-		t.log().Debug("SOCKS5 proxy stopped")
-	}
-
-	if watcher != nil {
-		t.log().Debug("Stopping watcher")
-		watcher.Stop()
-		t.log().Debug("Watcher stopped")
-	}
-
-	if server != nil {
-		t.log().Debug("Stopping tsnet server")
-		err := server.Close()
-		if err != nil {
-			t.log().Error("failed to close tsnet server", slog.Any("error", err))
-			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
-			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
-			t.setState(StoppedState)
-			return err
-		}
-		t.log().Debug("tsnet server stopped")
-	}
-
-	t.log().Debug("Tailnet stopped successfully")
-
-	// Atomically clear all fields under mu
-	t.mu.Lock()
-	t.server = nil
-	t.watcher = nil
-	t.socksProxy = nil
-	t.mu.Unlock()
-
-	t.setState(StoppedState)
-
-	return nil
-}
-
-// logout logs the machine out of the tailnet. This is different from stop, which just stops the local tsnet server but leaves the machine authenticated with the tailnet.
-// After logout, the machine will no longer be able to connect to the tailnet until it's logged in again.
-// logout will start the server if it's not already started, then log out from the tailnet.
-// During all of this we stay in the LoggingOut state.
-// No matter what happens, we transition to the Stopped state at the end, since if logout is successful we're logged out and if logout fails we're in a bad state and stopping is the safest option.
-func (t *Tailnet) logout(ctx context.Context) error {
-	// Set logging out state
-	t.setState(LoggingOutState)
-
-	// Ensure we transition to stopped state at the end
-	defer func() {
-		t.setState(StoppedState)
-	}()
-
-	// Read server under mu
-	t.mu.RLock()
-	server := t.server
-	t.mu.RUnlock()
-	stateDir := t.tsnetStateDir
-	hostname := t.userSetHostname
-
-	// Create server if needed (outside mu)
-	if server == nil {
-		server = &tsnet.Server{
-			Dir:      stateDir,
-			Hostname: hostname,
-			UserLogf: t.tsnetLogf(slog.LevelInfo),
-			Logf:     t.tsnetLogf(slog.LevelDebug),
-		}
-	}
-
-	// Do expensive I/O without holding mu (only opMu is held)
-	lc, err := server.LocalClient()
-	if err != nil {
-		t.log().Error("failed to get LocalClient for logout", slog.Any("error", err))
-		return err
-	}
-
-	t.log().Debug("Logging out from tailnet")
-
-	// TODO: Does logout auto close the server?
-	if err := lc.Logout(ctx); err != nil {
-		t.log().Error("failed to logout", slog.Any("error", err))
-		return err
-	}
-
-	t.log().Debug("Successfully logged out from tailnet (device may remain visible in admin console until manually deleted)")
-	return nil
 }
 
 func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
@@ -641,7 +608,7 @@ func (t *Tailnet) maybeTransitionToConnected(ipnState IPNState) {
 	t.setState(ConnectedState)
 }
 
-func (t *Tailnet) maybeUpdatePeers(ipnState IPNState) {
+func (t *Tailnet) updatePeers(ipnState IPNState) {
 	t.mu.Lock()
 	t.peers = ipnState.Peers
 	t.mu.Unlock()
