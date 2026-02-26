@@ -73,9 +73,7 @@ func (w *watcher) Start() {
 			w.logger.Debug("Received IPN notification", slog.String("notification", n.String()))
 			w.state = w.state.refresh(&n)
 			w.logger.Debug("Updated IPN state", slog.String("state", w.state.String()))
-			if w.onState != nil {
-				w.onState(ctx, w.state)
-			}
+			w.onState(ctx, w.state)
 		}
 	})
 }

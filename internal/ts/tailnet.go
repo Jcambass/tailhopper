@@ -119,10 +119,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	state := t.currentState
 	t.mu.RUnlock()
 
-	switch state {
-	case StoppedState:
-		// Allow starting
-	default:
+	if state != StoppedState {
 		return fmt.Errorf("unable to start: tailnet is in state %s", state)
 	}
 
@@ -217,6 +214,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	// Set stopping state
 	t.setState(StoppingState)
+	defer t.setState(StoppedState)
 
 	t.log().Debug("Stopping tailnet")
 
@@ -234,7 +232,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		if err != nil {
 			t.log().Error("failed to close SOCKS5 proxy", slog.Any("error", err))
 			// Mostly ignoring for now but if the proxy is stuck we get in trouble on start again due to the port being in use.
-			t.setState(StoppedState)
 			return err
 		}
 		t.log().Debug("SOCKS5 proxy stopped")
@@ -253,7 +250,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 			t.log().Error("failed to close tsnet server", slog.Any("error", err))
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
-			t.setState(StoppedState)
 			return err
 		}
 		t.log().Debug("tsnet server stopped")
@@ -267,8 +263,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	t.watcher = nil
 	t.socksProxy = nil
 	t.mu.Unlock()
-
-	t.setState(StoppedState)
 
 	return nil
 }
@@ -301,9 +295,7 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	t.setState(LoggingOutState)
 
 	// Ensure we transition to stopped state at the end
-	defer func() {
-		t.setState(StoppedState)
-	}()
+	defer t.setState(StoppedState)
 
 	// Read server under mu
 	t.mu.RLock()
@@ -347,28 +339,11 @@ func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, err
 	server := t.server
 	t.mu.RUnlock()
 
-	switch state {
-	case ConnectedState:
-		return server.Dial(ctx, network, addr)
-	case StoppedState:
-		return nil, errors.New("unable to dial: tailnet is stopped")
-	case StartedState:
-		return nil, errors.New("unable to dial: tailnet is started but not connected yet")
-	case StartingState:
-		return nil, errors.New("unable to dial: tailnet is starting")
-	case StoppingState:
-		return nil, errors.New("unable to dial: tailnet is stopping")
-	case NeedsLoginState:
-		return nil, errors.New("unable to dial: tailnet needs login")
-	case NeedsMachineAuthState:
-		return nil, errors.New("unable to dial: tailnet needs machine auth")
-	case HasTerminalErrorState:
-		return nil, errors.New("unable to dial: tailnet has terminal error")
-	case LoggingOutState:
-		return nil, errors.New("unable to dial: tailnet is logging out")
-	default:
-		return nil, errors.New("unable to dial: unknown state")
+	if state != ConnectedState {
+		return nil, fmt.Errorf("unable to dial: tailnet is in state %s", state)
 	}
+
+	return server.Dial(ctx, network, addr)
 }
 
 func (t *Tailnet) Hostname() string {
@@ -382,28 +357,11 @@ func (t *Tailnet) LoginURL() (string, error) {
 	loginURL := t.loginURL
 	t.mu.RUnlock()
 
-	switch state {
-	case NeedsLoginState:
-		return loginURL, nil
-	case ConnectedState:
-		return "", errors.New("unable to get login URL: tailnet is connected")
-	case StoppedState:
-		return "", errors.New("unable to get login URL: tailnet is stopped")
-	case StartedState:
-		return "", errors.New("unable to get login URL: tailnet is started but not connected yet")
-	case StartingState:
-		return "", errors.New("unable to get login URL: tailnet is starting")
-	case StoppingState:
-		return "", errors.New("unable to get login URL: tailnet is stopping")
-	case NeedsMachineAuthState:
-		return "", errors.New("unable to get login URL: tailnet needs machine auth")
-	case HasTerminalErrorState:
-		return "", errors.New("unable to get login URL: tailnet has terminal error")
-	case LoggingOutState:
-		return "", errors.New("unable to get login URL: tailnet is logging out")
-	default:
-		return "", errors.New("unable to get login URL: unknown state")
+	if state != NeedsLoginState {
+		return "", fmt.Errorf("unable to get login URL: tailnet is in state %s", state)
 	}
+
+	return loginURL, nil
 }
 
 func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
@@ -412,28 +370,11 @@ func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
 	peers := t.peers
 	t.mu.RUnlock()
 
-	switch state {
-	case ConnectedState:
-		return peers, nil
-	case StoppedState:
-		return nil, errors.New("unable to get peers: tailnet is stopped")
-	case StartedState:
-		return nil, errors.New("unable to get peers: tailnet is started but not connected yet")
-	case StartingState:
-		return nil, errors.New("unable to get peers: tailnet is starting")
-	case StoppingState:
-		return nil, errors.New("unable to get peers: tailnet is stopping")
-	case NeedsLoginState:
-		return nil, errors.New("unable to get peers: tailnet needs login")
-	case NeedsMachineAuthState:
-		return nil, errors.New("unable to get peers: tailnet needs machine auth")
-	case HasTerminalErrorState:
-		return nil, errors.New("unable to get peers: tailnet has terminal error")
-	case LoggingOutState:
-		return nil, errors.New("unable to get peers: tailnet is logging out")
-	default:
-		return nil, errors.New("unable to get peers: unknown state")
+	if state != ConnectedState {
+		return nil, fmt.Errorf("unable to get peers: tailnet is in state %s", state)
 	}
+
+	return peers, nil
 }
 
 func (t *Tailnet) TerminalError() (string, error) {
@@ -442,28 +383,11 @@ func (t *Tailnet) TerminalError() (string, error) {
 	terminalError := t.terminalError
 	t.mu.RUnlock()
 
-	switch state {
-	case HasTerminalErrorState:
-		return terminalError, nil
-	case ConnectedState:
-		return "", errors.New("unable to get terminal error: tailnet is connected")
-	case StoppedState:
-		return "", errors.New("unable to get terminal error: tailnet is stopped")
-	case StartedState:
-		return "", errors.New("unable to get terminal error: tailnet is started but not connected yet")
-	case StartingState:
-		return "", errors.New("unable to get terminal error: tailnet is starting")
-	case StoppingState:
-		return "", errors.New("unable to get terminal error: tailnet is stopping")
-	case NeedsLoginState:
-		return "", errors.New("unable to get terminal error: tailnet needs login")
-	case NeedsMachineAuthState:
-		return "", errors.New("unable to get terminal error: tailnet needs machine auth")
-	case LoggingOutState:
-		return "", errors.New("unable to get terminal error: tailnet is logging out")
-	default:
-		return "", errors.New("unable to get terminal error: unknown state")
+	if state != HasTerminalErrorState {
+		return "", fmt.Errorf("unable to get terminal error: tailnet is in state %s", state)
 	}
+
+	return terminalError, nil
 }
 
 func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) {
@@ -494,12 +418,9 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		t.maybeTransitionToNeedsLogin(ipnState)
 		t.maybeTransitionToConnected(ipnState)
 		return
-	case StoppedState, StartingState, StoppingState, HasTerminalErrorState, LoggingOutState:
-		// Simply ignore IPN state changes in these states.
-		return
 	default:
-		err := errors.New("unable to react to IPN state change: unknown state")
-		t.log().Error("unknown tailnet state during IPN reaction", slog.String("state", string(state)), slog.Any("error", err))
+		// Simply ignore IPN state changes in any other state.
+		return
 	}
 }
 
