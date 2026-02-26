@@ -32,7 +32,8 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 	var suffixes []string
 
 	for _, t := range tailnets {
-		suffix := t.MagicDNSSuffix()
+		snapshot := t.Snapshot()
+		suffix := snapshot.MagicDNSSuffix
 		// Skip tailnets without a claimed MagicDNS suffix
 		if suffix == "" {
 			continue

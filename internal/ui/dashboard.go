@@ -41,8 +41,9 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 	// Render a card for each tailnet
 	for _, tailnet := range tailnets {
 
+		snapshot := tailnet.Snapshot()
 		bestEffortDomain := "Tailnet"
-		tailnetMagicDNSSuffix := tailnet.MagicDNSSuffix()
+		tailnetMagicDNSSuffix := snapshot.MagicDNSSuffix
 		if tailnetMagicDNSSuffix != "" {
 			bestEffortDomain = tailnetMagicDNSSuffix
 		}
@@ -50,14 +51,14 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 		card := tailnetCard{
 			ID:         tailnet.ID(),
 			BaseDomain: bestEffortDomain,
-			stateName:  tailnet.StateName(),
-			Hostname:   tailnet.Hostname(),
+			stateName:  snapshot.State,
+			Hostname:   snapshot.Hostname,
 		}
 
-		if tailnet.StateName() == ts.HasTerminalErrorState {
-			terminalErr, err := tailnet.TerminalError()
-			if err != nil {
-				panic("unexpected error getting terminal error for tailnet in error state: " + err.Error())
+		if snapshot.State == ts.HasTerminalErrorState {
+			terminalErr := snapshot.TerminalError
+			if terminalErr == "" {
+				terminalErr = "unknown error"
 			}
 			card.ErrorMsg = terminalErr
 
@@ -65,27 +66,20 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			continue
 		}
 
-		if tailnet.StateName() == ts.NeedsLoginState {
-			loginURL, err := tailnet.LoginURL()
-			if err != nil {
-				panic("unexpected error getting login URL for tailnet in needs-login state: " + err.Error())
-			}
-			card.AuthURL = loginURL
+		if snapshot.State == ts.NeedsLoginState {
+			card.AuthURL = snapshot.LoginURL
 			data.Tailnets = append(data.Tailnets, card)
 			continue
 		}
 
-		if tailnet.StateName() == ts.ConnectedState {
+		if snapshot.State == ts.ConnectedState {
 			socksAddr := tailnet.SocksAddr()
 			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 			card.SocksAddr = socksAddr
 			card.SocksHost = socksHost
 			card.SocksPort = socksPort
 
-			peers, err := tailnet.Peers()
-			if err != nil {
-				panic("unexpected error getting peers for tailnet in connected state: " + err.Error())
-			}
+			peers := snapshot.Peers
 			// Add peer machines
 			for _, peer := range peers {
 				if peer.Addresses().Len() == 0 {
