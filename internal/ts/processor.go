@@ -2,7 +2,6 @@ package ts
 
 // ipnProcessor is a fluent builder for processing IPN state transitions.
 type ipnProcessor struct {
-	t        *Tailnet
 	ipnState IPNState
 	always   []func(IPNState) bool
 	oneOf    []func(IPNState) bool
@@ -11,7 +10,6 @@ type ipnProcessor struct {
 // ProcessIPN returns a new IPN processor for the given state.
 func (t *Tailnet) ProcessIPN(ipnState IPNState) *ipnProcessor {
 	return &ipnProcessor{
-		t:        t,
 		ipnState: ipnState,
 	}
 }

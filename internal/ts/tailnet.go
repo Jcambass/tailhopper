@@ -28,9 +28,23 @@ type Tailnet struct {
 	logMu  sync.RWMutex
 	logger *slog.Logger
 
-	// Protected by mu.
-	mu sync.RWMutex // Protects in-memory state fields
+	// commandMu protects user operations (Start, Stop, Logout) from running concurrently.
+	// We use an RWMutex so that status checks can proceed concurrently, but commands are exclusive.
+	// Lock order: commandMu -> dataMu
+	commandMu sync.RWMutex
 
+	// dataMu protects all mutable state fields that are relevant to the current state of the tailnet.
+	// This includes fields that are updated based on IPN state changes, as well as fields that are set on start and cleared on stop.
+	// When aquiring this lock, you must also acquire commandMu.RLock() first to ensure that the tailnet isn't being stopped or started while you're reading/updating state.
+	// Lock order: commandMu -> dataMu
+	dataMu sync.RWMutex
+
+	// Protected by commandMu.
+	server     *tsnet.Server
+	watcher    *watcher
+	socksProxy *socks.Server
+
+	// Protected by dataMu.
 	claimedMagicDNSSuffix string
 	terminalError         string
 
@@ -40,10 +54,6 @@ type Tailnet struct {
 	peers        []tailcfg.NodeView
 	loginURL     string
 	currentState State
-
-	server     *tsnet.Server
-	watcher    *watcher
-	socksProxy *socks.Server
 }
 
 func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func()) *Tailnet {
@@ -63,6 +73,7 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 		t.logger = t.logger.With("magic_dns_suffix", claimedMagicDNSSuffix)
 	}
 
+	// TODO: Set state directly without lock and notify.
 	if terminalError != "" {
 		t.setState(HasTerminalErrorState)
 	} else {
@@ -76,12 +87,15 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 // Always available to call
 // //
 func (t *Tailnet) String() string {
-	t.mu.RLock()
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
 	claimedMagicDNSSuffix := t.claimedMagicDNSSuffix
 	terminalError := t.terminalError
 	peers := t.peers
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	return fmt.Sprintf("Tailnet{id: %d, state: %s, claimedMagicDNSSuffix: %s, terminalError: %s, socksPort: %d, userSetHostname: %s, peers: %d}", t.id, state, claimedMagicDNSSuffix, terminalError, t.socksPort, t.userSetHostname, len(peers))
 }
@@ -98,9 +112,12 @@ func (t *Tailnet) SocksAddr() string {
 // Indirectly based on the current state of the tailnet but always callable.
 // //
 func (t *Tailnet) MagicDNSSuffix() string {
-	t.mu.RLock()
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
+	t.dataMu.RLock()
 	claimedMagicDNSSuffix := t.claimedMagicDNSSuffix
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 	return claimedMagicDNSSuffix
 }
 
@@ -108,16 +125,22 @@ func (t *Tailnet) MagicDNSSuffix() string {
 // Based on the current state of the tailnet
 // //
 func (t *Tailnet) StateName() State {
-	t.mu.RLock()
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 	return state
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
-	t.mu.RLock()
+	t.commandMu.Lock()
+	defer t.commandMu.Unlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	if state != StoppedState {
 		return fmt.Errorf("unable to start: tailnet is in state %s", state)
@@ -128,7 +151,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	t.log().Debug("Starting tailnet")
 
-	// Do expensive I/O without holding mu
+	// Do expensive I/O without holding dataMu
 	// Snapshot mutable fields under lock.
 	stateDir := t.tsnetStateDir
 	hostname := t.userSetHostname
@@ -188,12 +211,10 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	watcher := newWatcher(lc, t.reactToIPNStateChange, t.id)
 	watcher.Start()
 
-	// Atomically update all fields under mu
-	t.mu.Lock()
+	// Atomically update all fields under commandMu
 	t.server = server
 	t.watcher = watcher
 	t.socksProxy = socksProxy
-	t.mu.Unlock()
 
 	t.setState(StartedState)
 
@@ -201,9 +222,12 @@ func (t *Tailnet) Start(ctx context.Context) error {
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
-	t.mu.RLock()
+	t.commandMu.Lock()
+	defer t.commandMu.Unlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	switch state {
 	case ConnectedState, StartedState, StartingState, NeedsLoginState, NeedsMachineAuthState, HasTerminalErrorState:
@@ -218,14 +242,12 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	t.log().Debug("Stopping tailnet")
 
-	// Read fields under mu to get local copies for shutdown
-	t.mu.RLock()
+	// Read fields under commandMu to get local copies for shutdown
 	server := t.server
 	watcher := t.watcher
 	socksProxy := t.socksProxy
-	t.mu.RUnlock()
 
-	// Do expensive I/O without holding mu (only opMu is held)
+	// Do expensive I/O without holding dataMu (only opMu is held)
 	if socksProxy != nil {
 		t.log().Debug("Stopping SOCKS5 proxy")
 		err := socksProxy.Close()
@@ -257,12 +279,10 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	t.log().Debug("Tailnet stopped successfully")
 
-	// Atomically clear all fields under mu
-	t.mu.Lock()
+	// Atomically clear all fields under commandMu
 	t.server = nil
 	t.watcher = nil
 	t.socksProxy = nil
-	t.mu.Unlock()
 
 	return nil
 }
@@ -277,9 +297,12 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 // During all of this we stay in the LoggingOut state.
 // No matter what happens, we transition to the Stopped state at the end, since if logout is successful we're logged out and if logout fails we're in a bad state and stopping is the safest option.
 func (t *Tailnet) Logout(ctx context.Context) error {
-	t.mu.RLock()
+	t.commandMu.Lock()
+	defer t.commandMu.Unlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	switch state {
 	case NeedsLoginState:
@@ -297,14 +320,14 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	// Ensure we transition to stopped state at the end
 	defer t.setState(StoppedState)
 
-	// Read server under mu
-	t.mu.RLock()
+	// Read server under commandMu
 	server := t.server
-	t.mu.RUnlock()
+	t.dataMu.RLock()
 	stateDir := t.tsnetStateDir
 	hostname := t.userSetHostname
+	t.dataMu.RUnlock()
 
-	// Create server if needed (outside mu)
+	// Create server if needed (outside dataMu)
 	if server == nil {
 		server = &tsnet.Server{
 			Dir:      stateDir,
@@ -314,7 +337,7 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 		}
 	}
 
-	// Do expensive I/O without holding mu (only opMu is held)
+	// Do expensive I/O without holding dataMu (only opMu is held)
 	lc, err := server.LocalClient()
 	if err != nil {
 		t.log().Error("failed to get LocalClient for logout", slog.Any("error", err))
@@ -334,10 +357,14 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 }
 
 func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	t.mu.RLock()
-	state := t.currentState
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
 	server := t.server
-	t.mu.RUnlock()
+
+	t.dataMu.RLock()
+	state := t.currentState
+	t.dataMu.RUnlock()
 
 	if state != ConnectedState {
 		return nil, fmt.Errorf("unable to dial: tailnet is in state %s", state)
@@ -352,10 +379,10 @@ func (t *Tailnet) Hostname() string {
 }
 
 func (t *Tailnet) LoginURL() (string, error) {
-	t.mu.RLock()
+	t.dataMu.RLock()
 	state := t.currentState
 	loginURL := t.loginURL
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	if state != NeedsLoginState {
 		return "", fmt.Errorf("unable to get login URL: tailnet is in state %s", state)
@@ -365,10 +392,10 @@ func (t *Tailnet) LoginURL() (string, error) {
 }
 
 func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
-	t.mu.RLock()
+	t.dataMu.RLock()
 	state := t.currentState
 	peers := t.peers
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	if state != ConnectedState {
 		return nil, fmt.Errorf("unable to get peers: tailnet is in state %s", state)
@@ -378,10 +405,13 @@ func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
 }
 
 func (t *Tailnet) TerminalError() (string, error) {
-	t.mu.RLock()
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
+	t.dataMu.RLock()
 	state := t.currentState
 	terminalError := t.terminalError
-	t.mu.RUnlock()
+	t.dataMu.RUnlock()
 
 	if state != HasTerminalErrorState {
 		return "", fmt.Errorf("unable to get terminal error: tailnet is in state %s", state)
@@ -393,8 +423,11 @@ func (t *Tailnet) TerminalError() (string, error) {
 func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) {
 	t.log().Debug("Reacting to IPN state change", slog.String("ipn_state", ipnState.String()))
 
-	// Watcher path: hold mu for the entire decision to ensure atomicity.
-	t.mu.Lock()
+	t.commandMu.RLock()
+	defer t.commandMu.RUnlock()
+
+	// Watcher path: hold dataMu for the entire decision to ensure atomicity.
+	t.dataMu.Lock()
 	state := t.currentState
 	var changed bool
 
@@ -441,7 +474,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		// Simply ignore IPN state changes in any other state.
 	}
 
-	t.mu.Unlock()
+	t.dataMu.Unlock()
 
 	// Notify after releasing lock to keep lock time minimal.
 	if changed {
@@ -455,9 +488,9 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 // setState updates the current state and notifies listeners.
 func (t *Tailnet) setState(state State) {
-	t.mu.Lock()
+	t.dataMu.Lock()
 	t.currentState = state
-	t.mu.Unlock()
+	t.dataMu.Unlock()
 
 	t.log().Debug("set state", slog.String("state", string(state)))
 
@@ -478,7 +511,7 @@ func (t *Tailnet) log() *slog.Logger {
 	return t.logger
 }
 
-// Locked helpers below: require mu to be held by caller.
+// Locked helpers below: require dataMu to be held by caller.
 
 func (t *Tailnet) maybeClaimMagicDNSSuffixLocked(ipnState IPNState) bool {
 	// TODO: Handle case where the MagicDNS suffix changes while we're running.
