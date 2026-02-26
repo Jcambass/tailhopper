@@ -54,7 +54,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			Hostname:   tailnet.Hostname(),
 		}
 
-		if tailnet.StateName() == ts.HasTerminalErrorStateName {
+		if tailnet.StateName() == ts.HasTerminalErrorState {
 			terminalErr, err := tailnet.TerminalError()
 			if err != nil {
 				panic("unexpected error getting terminal error for tailnet in error state: " + err.Error())
@@ -65,7 +65,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			continue
 		}
 
-		if tailnet.StateName() == ts.NeedsLoginStateName {
+		if tailnet.StateName() == ts.NeedsLoginState {
 			loginURL, err := tailnet.LoginURL()
 			if err != nil {
 				panic("unexpected error getting login URL for tailnet in needs-login state: " + err.Error())
@@ -75,7 +75,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			continue
 		}
 
-		if tailnet.StateName() == ts.ConnectedStateName {
+		if tailnet.StateName() == ts.ConnectedState {
 			socksAddr := tailnet.SocksAddr()
 			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 			card.SocksAddr = socksAddr
@@ -120,7 +120,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 				return strings.ToLower(card.Machines[i].DNSName) < strings.ToLower(card.Machines[j].DNSName)
 			})
 
-			card.stateName = ts.ConnectedStateName
+			card.stateName = ts.ConnectedState
 
 			data.Tailnets = append(data.Tailnets, card)
 			continue

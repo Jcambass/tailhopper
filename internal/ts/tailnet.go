@@ -29,17 +29,8 @@ type Tailnet struct {
 	peers    []tailcfg.NodeView
 	loginURL string
 
-	mu               sync.RWMutex
-	currentState     State
-	connected        State
-	hasTerminalError State
-	needsLogin       State
-	needsMachineAuth State
-	started          State
-	starting         State
-	stopped          State
-	stopping         State
-	loggingOut       State
+	mu           sync.RWMutex
+	currentState State
 
 	server     *tsnet.Server
 	watcher    *watcher
@@ -69,20 +60,10 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 		t.logger = t.logger.With("magic_dns_suffix", claimedMagicDNSSuffix)
 	}
 
-	t.connected = &ConnectedState{tailnet: t}
-	t.hasTerminalError = &HasTerminalErrorState{tailnet: t}
-	t.needsLogin = &NeedsLoginState{tailnet: t}
-	t.needsMachineAuth = &NeedsMachineAuthState{tailnet: t}
-	t.started = &StartedState{tailnet: t}
-	t.starting = &StartingState{tailnet: t}
-	t.stopped = &StoppedState{tailnet: t}
-	t.stopping = &StoppingState{tailnet: t}
-	t.loggingOut = &LoggingOutState{tailnet: t}
-
 	if terminalError != "" {
-		t.setState(t.hasTerminalError)
+		t.setState(HasTerminalErrorState)
 	} else {
-		t.setState(t.stopped)
+		t.setState(StoppedState)
 	}
 
 	return t
@@ -92,7 +73,7 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 // Always available to call
 // //
 func (t *Tailnet) String() string {
-	return fmt.Sprintf("Tailnet{id: %d, state: %s, claimedMagicDNSSuffix: %s, terminalError: %s, socksPort: %d, userSetHostname: %s, peers: %d}", t.id, t.currentState.Name(), t.claimedMagicDNSSuffix, t.terminalError, t.socksPort, t.userSetHostname, len(t.peers))
+	return fmt.Sprintf("Tailnet{id: %d, state: %s, claimedMagicDNSSuffix: %s, terminalError: %s, socksPort: %d, userSetHostname: %s, peers: %d}", t.id, t.currentState, t.claimedMagicDNSSuffix, t.terminalError, t.socksPort, t.userSetHostname, len(t.peers))
 }
 
 func (t *Tailnet) ID() int {
@@ -115,29 +96,113 @@ func (t *Tailnet) MagicDNSSuffix() string {
 // //
 // Based on the current state of the tailnet
 // //
-func (t *Tailnet) StateName() StateName {
+func (t *Tailnet) StateName() State {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.currentState.Name()
+	return t.currentState
 }
 
 func (t *Tailnet) Start(ctx context.Context) error {
-	return t.currentState.Start(ctx)
+	t.mu.RLock()
+	state := t.currentState
+	t.mu.RUnlock()
+
+	switch state {
+	case StoppedState:
+		return t.start(ctx)
+	case ConnectedState:
+		return errors.New("unable to start: tailnet is already connected")
+	case StartedState:
+		return errors.New("unable to start: tailnet is already started")
+	case StartingState:
+		return errors.New("unable to start: tailnet is already starting")
+	case StoppingState:
+		return errors.New("unable to start: tailnet is stopping")
+	case NeedsLoginState:
+		return errors.New("unable to start: tailnet is already started (needs login)")
+	case NeedsMachineAuthState:
+		return errors.New("unable to start: tailnet is already started (needs machine auth)")
+	case HasTerminalErrorState:
+		return errors.New("unable to start: tailnet is already started (has terminal error)")
+	case LoggingOutState:
+		return errors.New("unable to start: tailnet is logging out")
+	default:
+		return errors.New("unable to start: unknown state")
+	}
 }
 
 func (t *Tailnet) Stop(ctx context.Context) error {
-	return t.currentState.Stop(ctx)
+	t.mu.RLock()
+	state := t.currentState
+	t.mu.RUnlock()
+
+	switch state {
+	case StoppedState:
+		return errors.New("unable to stop: tailnet is already stopped")
+	case StoppingState:
+		return errors.New("unable to stop: tailnet is already stopping")
+	case LoggingOutState:
+		return errors.New("unable to stop: tailnet is logging out")
+	case ConnectedState, StartedState, StartingState, NeedsLoginState, NeedsMachineAuthState, HasTerminalErrorState:
+		return t.stop(ctx)
+	default:
+		return errors.New("unable to stop: unknown state")
+	}
 }
 
 // Logout logs out from the tailnet and cleans up local state.
 // Note: The device may remain visible in the Tailscale admin console as "disconnected"
 // until manually deleted or it expires. This is expected Tailscale behavior.
 func (t *Tailnet) Logout(ctx context.Context) error {
-	return t.currentState.Logout(ctx)
+	t.mu.RLock()
+	state := t.currentState
+	t.mu.RUnlock()
+
+	switch state {
+	case NeedsLoginState:
+		// Logout is a no-op in the needs login state since the user is already effectively logged out.
+		return nil
+	case StartingState:
+		return errors.New("unable to logout: tailnet is starting")
+	case StoppingState:
+		return errors.New("unable to logout: tailnet is stopping")
+	case LoggingOutState:
+		return errors.New("unable to logout: tailnet is already logging out")
+	case ConnectedState, StoppedState, StartedState, NeedsMachineAuthState, HasTerminalErrorState:
+		return t.logout(ctx)
+	default:
+		return errors.New("unable to logout: unknown state")
+	}
 }
 
 func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	return t.currentState.Dial(ctx, network, addr)
+	t.mu.RLock()
+	state := t.currentState
+	server := t.server
+	t.mu.RUnlock()
+
+	switch state {
+	case ConnectedState:
+		return server.Dial(ctx, network, addr)
+	case StoppedState:
+		return nil, errors.New("unable to dial: tailnet is stopped")
+	case StartedState:
+		return nil, errors.New("unable to dial: tailnet is started but not connected yet")
+	case StartingState:
+		return nil, errors.New("unable to dial: tailnet is starting")
+	case StoppingState:
+		return nil, errors.New("unable to dial: tailnet is stopping")
+	case NeedsLoginState:
+		return nil, errors.New("unable to dial: tailnet needs login")
+	case NeedsMachineAuthState:
+		return nil, errors.New("unable to dial: tailnet needs machine auth")
+	case HasTerminalErrorState:
+		return nil, errors.New("unable to dial: tailnet has terminal error")
+	case LoggingOutState:
+		return nil, errors.New("unable to dial: tailnet is logging out")
+	default:
+		return nil, errors.New("unable to dial: unknown state")
+	}
 }
 
 func (t *Tailnet) Hostname() string {
@@ -149,25 +214,127 @@ func (t *Tailnet) Hostname() string {
 
 func (t *Tailnet) LoginURL() (string, error) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.LoginURL()
+	state := t.currentState
+	loginURL := t.loginURL
+	t.mu.RUnlock()
+
+	switch state {
+	case NeedsLoginState:
+		return loginURL, nil
+	case ConnectedState:
+		return "", errors.New("unable to get login URL: tailnet is connected")
+	case StoppedState:
+		return "", errors.New("unable to get login URL: tailnet is stopped")
+	case StartedState:
+		return "", errors.New("unable to get login URL: tailnet is started but not connected yet")
+	case StartingState:
+		return "", errors.New("unable to get login URL: tailnet is starting")
+	case StoppingState:
+		return "", errors.New("unable to get login URL: tailnet is stopping")
+	case NeedsMachineAuthState:
+		return "", errors.New("unable to get login URL: tailnet needs machine auth")
+	case HasTerminalErrorState:
+		return "", errors.New("unable to get login URL: tailnet has terminal error")
+	case LoggingOutState:
+		return "", errors.New("unable to get login URL: tailnet is logging out")
+	default:
+		return "", errors.New("unable to get login URL: unknown state")
+	}
 }
 
 func (t *Tailnet) Peers() ([]tailcfg.NodeView, error) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.Peers()
+	state := t.currentState
+	peers := t.peers
+	t.mu.RUnlock()
+
+	switch state {
+	case ConnectedState:
+		return peers, nil
+	case StoppedState:
+		return nil, errors.New("unable to get peers: tailnet is stopped")
+	case StartedState:
+		return nil, errors.New("unable to get peers: tailnet is started but not connected yet")
+	case StartingState:
+		return nil, errors.New("unable to get peers: tailnet is starting")
+	case StoppingState:
+		return nil, errors.New("unable to get peers: tailnet is stopping")
+	case NeedsLoginState:
+		return nil, errors.New("unable to get peers: tailnet needs login")
+	case NeedsMachineAuthState:
+		return nil, errors.New("unable to get peers: tailnet needs machine auth")
+	case HasTerminalErrorState:
+		return nil, errors.New("unable to get peers: tailnet has terminal error")
+	case LoggingOutState:
+		return nil, errors.New("unable to get peers: tailnet is logging out")
+	default:
+		return nil, errors.New("unable to get peers: unknown state")
+	}
 }
 
 func (t *Tailnet) TerminalError() (string, error) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.currentState.TerminalError()
+	state := t.currentState
+	terminalError := t.terminalError
+	t.mu.RUnlock()
+
+	switch state {
+	case HasTerminalErrorState:
+		return terminalError, nil
+	case ConnectedState:
+		return "", errors.New("unable to get terminal error: tailnet is connected")
+	case StoppedState:
+		return "", errors.New("unable to get terminal error: tailnet is stopped")
+	case StartedState:
+		return "", errors.New("unable to get terminal error: tailnet is started but not connected yet")
+	case StartingState:
+		return "", errors.New("unable to get terminal error: tailnet is starting")
+	case StoppingState:
+		return "", errors.New("unable to get terminal error: tailnet is stopping")
+	case NeedsLoginState:
+		return "", errors.New("unable to get terminal error: tailnet needs login")
+	case NeedsMachineAuthState:
+		return "", errors.New("unable to get terminal error: tailnet needs machine auth")
+	case LoggingOutState:
+		return "", errors.New("unable to get terminal error: tailnet is logging out")
+	default:
+		return "", errors.New("unable to get terminal error: unknown state")
+	}
 }
 
 // Not using a log since the functions inside ReactToIPNStateChange themself lock when needed.
 func (t *Tailnet) ReactToIPNStateChange(ctx context.Context, ipnState IPNState) error {
-	return t.currentState.ReactToIPNStateChange(ctx, ipnState)
+	t.mu.RLock()
+	state := t.currentState
+	t.mu.RUnlock()
+
+	switch state {
+	case ConnectedState:
+		t.maybeClaimMagicDNSSuffix(ipnState)
+		t.maybeTransitionToNeedsLogin(ipnState)
+		t.maybeTransitionToNeedsMachineAuth(ipnState)
+		t.maybeUpdatePeers(ipnState)
+		return nil
+	case StartedState:
+		t.maybeTransitionToNeedsLogin(ipnState)
+		t.maybeTransitionToNeedsMachineAuth(ipnState)
+		t.maybeTransitionToConnected(ipnState)
+		return nil
+	case NeedsLoginState:
+		t.maybeTransitionToNeedsMachineAuth(ipnState)
+		t.maybeTransitionToConnected(ipnState)
+		return nil
+	case NeedsMachineAuthState:
+		t.maybeClaimMagicDNSSuffix(ipnState)
+		t.maybeTransitionToNeedsLogin(ipnState)
+		t.maybeTransitionToConnected(ipnState)
+		return nil
+	case StoppedState, StartingState, StoppingState, HasTerminalErrorState, LoggingOutState:
+		// Simply ignore IPN state changes in these states.
+		return nil
+	default:
+		return errors.New("unable to react to IPN state change: unknown state")
+	}
 }
 
 ////
@@ -179,7 +346,7 @@ func (t *Tailnet) setState(state State) {
 	t.currentState = state
 	t.mu.Unlock()
 
-	t.log().Debug("set state", slog.String("state", string(state.Name())))
+	t.log().Debug("set state", slog.String("state", string(state)))
 
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
 	if t.broadcast != nil {
@@ -189,7 +356,7 @@ func (t *Tailnet) setState(state State) {
 
 func (t *Tailnet) setLockedStateNoNotify(state State) {
 	t.currentState = state
-	t.log().Debug("set state", slog.String("state", string(state.Name())))
+	t.log().Debug("set state", slog.String("state", string(state)))
 }
 
 func (t *Tailnet) log() *slog.Logger {
@@ -199,7 +366,7 @@ func (t *Tailnet) log() *slog.Logger {
 }
 
 func (t *Tailnet) start(ctx context.Context) error {
-	t.setState(t.starting)
+	t.setState(StartingState)
 
 	t.log().Debug("Starting tailnet")
 
@@ -209,7 +376,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
 		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
-		t.setState(t.stopped)
+		t.setState(StoppedState)
 		return err
 	}
 	t.socksProxy = socksProxy
@@ -236,7 +403,7 @@ func (t *Tailnet) start(ctx context.Context) error {
 		}
 		t.socksProxy = nil
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
-		t.setState(t.stopped)
+		t.setState(StoppedState)
 		return err
 	}
 
@@ -245,12 +412,12 @@ func (t *Tailnet) start(ctx context.Context) error {
 	t.watcher = newWatcher(t)
 	t.watcher.Start()
 
-	t.setState(t.started)
+	t.setState(StartedState)
 	return nil
 }
 
 func (t *Tailnet) stop(ctx context.Context) error {
-	t.setState(t.stopping)
+	t.setState(StoppingState)
 
 	t.log().Debug("Stopping tailnet")
 
@@ -280,7 +447,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 			t.log().Error("failed to close tsnet server", slog.Any("error", err))
 			// TODO: What should we do if the server fails to close? The tailnet is in a bad state either way.
 			// Is it stopped, is it started, is it in a failed stop state that is non terminal?
-			t.setState(t.stopped)
+			t.setState(StoppedState)
 			return err
 		}
 		t.log().Debug("tsnet server stopped")
@@ -289,7 +456,7 @@ func (t *Tailnet) stop(ctx context.Context) error {
 
 	t.log().Debug("Tailnet stopped successfully")
 
-	t.setState(t.stopped)
+	t.setState(StoppedState)
 	return nil
 }
 
@@ -301,8 +468,8 @@ func (t *Tailnet) stop(ctx context.Context) error {
 func (t *Tailnet) logout(ctx context.Context) error {
 	// TODO: This and start/stop need some concurrency protection.
 	// State changes themself are guarded but I think we can still mess up and it's hard to see what's safe and what is not!
-	t.setState(t.loggingOut)
-	defer t.setState(t.stopped)
+	t.setState(LoggingOutState)
+	defer t.setState(StoppedState)
 
 	if t.server == nil {
 		t.server = &tsnet.Server{
@@ -354,7 +521,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 			t.log().Error("magic DNS suffix claim error", slog.Any("error", claimErr))
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
 			t.terminalError = claimErr.Error()
-			t.setLockedStateNoNotify(t.hasTerminalError)
+			t.setLockedStateNoNotify(HasTerminalErrorState)
 			t.mu.Unlock()
 
 			// TODO: Persist the terminal error to disk so it survives restarts.
@@ -404,7 +571,7 @@ func (t *Tailnet) maybeTransitionToNeedsLogin(ipnState IPNState) {
 
 	t.loginURL = *ipnState.BrowseToURL
 
-	t.setLockedStateNoNotify(t.needsLogin)
+	t.setLockedStateNoNotify(NeedsLoginState)
 	t.mu.Unlock()
 
 	// Notify about the state change after unlocking to prevent holding the lock for a long time.
@@ -418,7 +585,7 @@ func (t *Tailnet) maybeTransitionToNeedsMachineAuth(ipnState IPNState) {
 		return
 	}
 
-	t.setState(t.needsMachineAuth)
+	t.setState(NeedsMachineAuthState)
 }
 
 func (t *Tailnet) maybeTransitionToConnected(ipnState IPNState) {
@@ -426,7 +593,7 @@ func (t *Tailnet) maybeTransitionToConnected(ipnState IPNState) {
 		return
 	}
 
-	t.setState(t.connected)
+	t.setState(ConnectedState)
 }
 
 func (t *Tailnet) maybeUpdatePeers(ipnState IPNState) {

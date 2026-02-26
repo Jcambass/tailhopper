@@ -92,7 +92,7 @@ type tailnetCard struct {
 	SocksHost  string
 	SocksPort  string
 	Machines   []machineView
-	stateName  ts.StateName
+	stateName  ts.State
 	Hostname   string
 	AuthURL    string
 	ErrorMsg   string
@@ -100,21 +100,21 @@ type tailnetCard struct {
 
 func (c tailnetCard) StateClass() StateClass {
 	switch c.stateName {
-	case ts.ConnectedStateName:
+	case ts.ConnectedState:
 		return StateClassConnected
-	case ts.HasTerminalErrorStateName:
+	case ts.HasTerminalErrorState:
 		return StateClassError
-	case ts.NeedsLoginStateName:
+	case ts.NeedsLoginState:
 		return StateClassNeedsLogin
-	case ts.NeedsMachineAuthStateName:
+	case ts.NeedsMachineAuthState:
 		return StateClassNeedsAuth
-	case ts.StartingStateName, ts.StartedStateName:
+	case ts.StartingState, ts.StartedState:
 		return StateClassConnecting
-	case ts.StoppingStateName:
+	case ts.StoppingState:
 		return StateClassDisabling
-	case ts.StoppedStateName:
+	case ts.StoppedState:
 		return StateClassDisabled
-	case ts.LoggingOutStateName:
+	case ts.LoggingOutState:
 		return StateClassLoggingOut
 	default:
 		panic("unexpected state name: " + string(c.stateName))
@@ -122,11 +122,11 @@ func (c tailnetCard) StateClass() StateClass {
 }
 
 func (c tailnetCard) IsToggleOn() bool {
-	return c.stateName != ts.StoppingStateName && c.stateName != ts.StoppedStateName && c.stateName != ts.HasTerminalErrorStateName && c.stateName != ts.LoggingOutStateName
+	return c.stateName != ts.StoppingState && c.stateName != ts.StoppedState && c.stateName != ts.HasTerminalErrorState && c.stateName != ts.LoggingOutState
 }
 
 func (c tailnetCard) IsToggleDisabled() bool {
-	return c.stateName == ts.StartingStateName || c.stateName == ts.StoppingStateName || c.stateName == ts.HasTerminalErrorStateName || c.stateName == ts.LoggingOutStateName
+	return c.stateName == ts.StartingState || c.stateName == ts.StoppingState || c.stateName == ts.HasTerminalErrorState || c.stateName == ts.LoggingOutState
 }
 
 func (c tailnetCard) ToggleAction() string {
@@ -137,7 +137,7 @@ func (c tailnetCard) ToggleAction() string {
 }
 
 func (c tailnetCard) IsErrorState() bool {
-	return c.stateName == ts.HasTerminalErrorStateName
+	return c.stateName == ts.HasTerminalErrorState
 }
 
 // machineView represents a machine for display.
