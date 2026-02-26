@@ -474,8 +474,9 @@ func (t *Tailnet) maybeClaimMagicDNSSuffix(ipnState IPNState) {
 			// This is a terminal error - the tailnet is trying to use a MagicDNS suffix that's already in use
 			t.mu.Lock()
 			t.terminalError = claimErr.Error()
+			t.currentState = HasTerminalErrorState
 			t.mu.Unlock()
-			t.setState(HasTerminalErrorState)
+			t.notify()
 
 			// TODO: Persist the terminal error to disk so it survives restarts.
 			return
@@ -509,8 +510,9 @@ func (t *Tailnet) maybeTransitionToNeedsLogin(ipnState IPNState) {
 
 	t.mu.Lock()
 	t.loginURL = *ipnState.BrowseToURL
+	t.currentState = NeedsLoginState
 	t.mu.Unlock()
-	t.setState(NeedsLoginState)
+	t.notify()
 }
 
 func (t *Tailnet) maybeTransitionToNeedsMachineAuth(ipnState IPNState) {
