@@ -93,6 +93,7 @@ type tailnetCard struct {
 	SocksPort  string
 	Machines   []machineView
 	stateName  ts.State
+	userState  ts.UserState
 	Hostname   string
 	AuthURL    string
 	ErrorMsg   string
@@ -122,7 +123,7 @@ func (c tailnetCard) StateClass() StateClass {
 }
 
 func (c tailnetCard) IsToggleOn() bool {
-	return c.stateName != ts.StoppingState && c.stateName != ts.StoppedState && c.stateName != ts.HasTerminalErrorState && c.stateName != ts.LoggingOutState
+	return c.userState == ts.UserEnabled
 }
 
 func (c tailnetCard) IsToggleDisabled() bool {

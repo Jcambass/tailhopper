@@ -23,6 +23,8 @@ type Tailnet struct {
 	userSetHostname        string
 	magicDNSSuffixRegistry MagicDNSSuffixRegistry
 	broadcast              func()
+	// onUserStateChange, if non-nil, is called whenever the user's desired state changes.
+	onUserStateChange func(UserState)
 
 	// Logger has its own lock to avoid blocking state reads.
 	logMu  sync.RWMutex
@@ -44,6 +46,10 @@ type Tailnet struct {
 	loginURL              string
 	currentState          State
 
+	// userState tracks the user's desired on/off state, independent of the
+	// internal connection state managed by Tailscale IPN events.
+	userState UserState
+
 	// TODO: Also store hostname from tailscale
 	// SelfNode.ComputedName()
 }
@@ -51,6 +57,7 @@ type Tailnet struct {
 type TailnetSnapshot struct {
 	ID             int
 	State          State
+	UserState      UserState
 	MagicDNSSuffix string
 	Hostname       string
 	LoginURL       string
@@ -59,14 +66,15 @@ type TailnetSnapshot struct {
 }
 
 func (s *TailnetSnapshot) String() string {
-	return fmt.Sprintf("TailnetSnapshot{ID: %d, State: %s, MagicDNSSuffix: %s, Hostname: %s, LoginURL: %s, Peers: %d, TerminalError: %s}", s.ID, s.State, s.MagicDNSSuffix, s.Hostname, s.LoginURL, len(s.Peers), s.TerminalError)
+	return fmt.Sprintf("TailnetSnapshot{ID: %d, State: %s, UserState: %s, MagicDNSSuffix: %s, Hostname: %s, LoginURL: %s, Peers: %d, TerminalError: %s}", s.ID, s.State, s.UserState, s.MagicDNSSuffix, s.Hostname, s.LoginURL, len(s.Peers), s.TerminalError)
 }
 
-func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func()) *Tailnet {
+func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func(), onUserStateChange func(UserState)) *Tailnet {
 	t := &Tailnet{
 		id:                     id,
 		magicDNSSuffixRegistry: magicDNSSuffixRegistry,
 		broadcast:              broadcast,
+		onUserStateChange:      onUserStateChange,
 		logger:                 slog.Default().With("component", "tailnet", "tailnet_id", id),
 		tsnetStateDir:          tsnetStateDir,
 		userSetHostname:        hostname,
@@ -81,8 +89,15 @@ func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSu
 
 	if terminalError != "" {
 		t.currentState = HasTerminalErrorState
+		// A terminal error was persisted, so the tailnet was previously enabled.
+		t.userState = UserEnabled
 	} else {
 		t.currentState = StoppedState
+		if userEnabled {
+			t.userState = UserEnabled
+		} else {
+			t.userState = UserDisabled
+		}
 	}
 
 	return t
@@ -109,6 +124,7 @@ func (t *Tailnet) Snapshot() TailnetSnapshot {
 		Peers:         t.peers,
 		TerminalError: t.terminalError,
 		State:         t.currentState,
+		UserState:     t.userState,
 	}
 }
 
@@ -120,6 +136,10 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	if t.currentState != StoppedState {
 		return fmt.Errorf("unable to start: tailnet is in state %s", t.currentState)
 	}
+
+	// Record user's intent to enable the tailnet.
+	t.userState = UserEnabled
+	t.notifyUserStateChange(UserEnabled)
 
 	// Set starting state
 	t.setState(StartingState)
@@ -203,6 +223,10 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 		return fmt.Errorf("unable to stop: tailnet is in state %s", t.currentState)
 	}
 
+	// Record user's intent to disable the tailnet.
+	t.userState = UserDisabled
+	t.notifyUserStateChange(UserDisabled)
+
 	// Set stopping state
 	t.setState(StoppingState)
 	defer t.setState(StoppedState)
@@ -273,6 +297,10 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	default:
 		return fmt.Errorf("unable to logout: tailnet is in state %s", t.currentState)
 	}
+
+	// Record user's intent to disable the tailnet.
+	t.userState = UserDisabled
+	t.notifyUserStateChange(UserDisabled)
 
 	// Set logging out state
 	t.setState(LoggingOutState)
@@ -398,6 +426,15 @@ func (t *Tailnet) setState(state State) {
 func (t *Tailnet) notify() {
 	if t.broadcast != nil {
 		t.broadcast()
+	}
+}
+
+// notifyUserStateChange calls the onUserStateChange callback if set.
+// Callers (Start, Stop, Logout) hold t.mu when invoking this; the callback
+// only acquires the registry lock, so there is no deadlock risk.
+func (t *Tailnet) notifyUserStateChange(s UserState) {
+	if t.onUserStateChange != nil {
+		t.onUserStateChange(s)
 	}
 }
 

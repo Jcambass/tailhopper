@@ -24,6 +24,8 @@ type PersistedTailnet struct {
 	SocksPort int `json:"socks_port"`
 	// Hostname is the hostname used for the tailnet device.
 	Hostname string `json:"hostname"`
+	// UserEnabled records whether the user last switched the tailnet on.
+	UserEnabled bool `json:"user_enabled"`
 	// ClaimedMagicDNSSuffix is the domain we expect this tailnet to be logged into.
 	// If empty, it will be set upon first successful connection.
 	ClaimedMagicDNSSuffix string `json:"claimed_magic_dns_suffix,omitempty"`
@@ -126,7 +128,9 @@ func (m *Registry) Load() error {
 			}
 		}
 
-		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.SocksPort, m, broadcast)
+		onUserStateChange := m.userStateChangeCallback(c.ID)
+
+		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
@@ -139,6 +143,23 @@ func (m *Registry) Load() error {
 	}
 
 	return nil
+}
+
+// userStateChangeCallback returns a callback that persists the user's desired state for the tailnet with the given ID.
+// The callback is safe to call while the tailnet's lock is held, since it only acquires the registry lock.
+func (m *Registry) userStateChangeCallback(id int) func(ts.UserState) {
+	return func(s ts.UserState) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		tailnet, ok := m.tailnets[id]
+		if !ok {
+			return
+		}
+
+		tailnet.config.UserEnabled = s == ts.UserEnabled
+		_ = m.saveLocked()
+	}
 }
 
 func (m *Registry) saveLocked() error {
@@ -223,7 +244,10 @@ func (m *Registry) Add(hostname string) (*ts.Tailnet, error) {
 		}
 	}
 
-	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", c.SocksPort, m, broadcast)
+	onUserStateChange := m.userStateChangeCallback(id)
+
+	// New tailnets start disabled; user_enabled will be persisted when the user starts it.
+	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange)
 
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,

@@ -52,6 +52,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			ID:         tailnet.ID(),
 			BaseDomain: bestEffortDomain,
 			stateName:  snapshot.State,
+			userState:  snapshot.UserState,
 			Hostname:   snapshot.Hostname,
 		}
 
