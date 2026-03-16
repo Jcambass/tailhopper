@@ -80,6 +80,7 @@ const (
 	StateClassConnecting StateClass = "connecting"
 	StateClassDisabled   StateClass = "disabled"
 	StateClassError      StateClass = "error"
+	StateClassLoggingOut StateClass = "logging-out"
 )
 
 // tailnetCard contains all data for rendering a single tailnet card.
@@ -111,6 +112,8 @@ func (c tailnetCard) StateClass() StateClass {
 		return StateClassConnecting
 	case ts.StoppedState:
 		return StateClassDisabled
+	case ts.LoggingOutState:
+		return StateClassLoggingOut
 	default:
 		panic("unexpected state name: " + string(c.stateName))
 	}
@@ -121,7 +124,7 @@ func (c tailnetCard) IsToggleOn() bool {
 }
 
 func (c tailnetCard) IsToggleDisabled() bool {
-	return c.stateName == ts.HasTerminalErrorState
+	return c.stateName == ts.HasTerminalErrorState || c.stateName == ts.LoggingOutState
 }
 
 func (c tailnetCard) ToggleAction() string {

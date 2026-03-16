@@ -16,6 +16,7 @@ type State string
 const (
 	ConnectedState        State = "ConnectedState"
 	HasTerminalErrorState State = "HasTerminalErrorState"
+	LoggingOutState       State = "LoggingOutState"
 	NeedsLoginState       State = "NeedsLoginState"
 	NeedsMachineAuthState State = "NeedsMachineAuthState"
 	StartedState          State = "StartedState"

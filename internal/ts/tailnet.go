@@ -279,15 +279,16 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 // No matter what happens, we transition to the Stopped state at the end, since if logout is successful we're logged out and if logout fails we're in a bad state and stopping is the safest option.
 func (t *Tailnet) Logout(ctx context.Context) error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	switch t.currentState {
 	case NeedsLoginState:
 		// Logout is a no-op in the needs login state since the user is already effectively logged out.
+		t.mu.Unlock()
 		return nil
 	case ConnectedState, StoppedState, StartedState, NeedsMachineAuthState, HasTerminalErrorState:
 		// Allow logout
 	default:
+		t.mu.Unlock()
 		return fmt.Errorf("unable to logout: tailnet is in state %s", t.currentState)
 	}
 
@@ -295,10 +296,11 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	t.userState = UserDisabled
 	t.notifyUserStateChange(UserDisabled)
 
-	// Ensure we transition to stopped state at the end
-	defer t.setState(StoppedState)
+	// Set logging out state before releasing the lock so the UI can show it
+	// while the network call is in flight.
+	t.setState(LoggingOutState)
 
-	// Create server if needed (outside dataMu)
+	// Create server if needed before releasing the lock.
 	if t.server == nil {
 		t.server = &tsnet.Server{
 			Dir:      t.tsnetStateDir,
@@ -307,9 +309,21 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 			Logf:     t.tsnetLogf(slog.LevelDebug),
 		}
 	}
+	server := t.server
 
-	// Do expensive I/O without holding dataMu (only opMu is held)
-	lc, err := t.server.LocalClient()
+	t.mu.Unlock()
+
+	// Ensure we transition to stopped state at the end regardless of outcome.
+	// We re-acquire the lock here since we released it above to allow the UI
+	// to observe LoggingOutState while the network call is in flight.
+	defer func() {
+		t.mu.Lock()
+		t.setState(StoppedState)
+		t.mu.Unlock()
+	}()
+
+	// Do expensive I/O without holding the lock so LoggingOutState is observable.
+	lc, err := server.LocalClient()
 	if err != nil {
 		t.log().Error("failed to get LocalClient for logout", slog.Any("error", err))
 		return err

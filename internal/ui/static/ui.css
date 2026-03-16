@@ -344,6 +344,10 @@ h1 {
   background: #2196F3;
 }
 
+.state-dot-inline.state-logging-out {
+  background: #ff9800;
+}
+
 .state-dot-inline.state-error {
   background: #f44336;
 }
