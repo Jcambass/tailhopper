@@ -137,7 +137,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	// Record user's intent to enable the tailnet.
 	t.userState = UserEnabled
-	t.notifyUserStateChange(UserEnabled)
+	t.notifyUserStateChange(t.userState)
 
 	t.log().Debug("Starting tailnet")
 
@@ -220,7 +220,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.notifyUserStateChange(UserDisabled)
+	t.notifyUserStateChange(t.userState)
 
 	defer t.setState(StoppedState)
 
@@ -294,7 +294,7 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.notifyUserStateChange(UserDisabled)
+	t.notifyUserStateChange(t.userState)
 
 	// Set logging out state before releasing the lock so the UI can show it
 	// while the network call is in flight.
