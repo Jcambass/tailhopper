@@ -336,10 +336,6 @@ h1 {
   background: #ff9800;
 }
 
-.state-dot-inline.state-disabling {
-  background: #ff9800;
-}
-
 .state-dot-inline.state-needs-login {
   background: #2196F3;
 }
@@ -347,11 +343,6 @@ h1 {
 .state-dot-inline.state-needs-auth {
   background: #2196F3;
 }
-
-.state-dot-inline.state-logging-out {
-  background: #ff9800;
-}
-
 
 .state-dot-inline.state-error {
   background: #f44336;

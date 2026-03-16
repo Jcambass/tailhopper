@@ -30,8 +30,6 @@ type Tailnet struct {
 	logMu  sync.RWMutex
 	logger *slog.Logger
 
-	// TODO: We now block the UI fully during state transitions.
-	// This makes the distinction between StoppingState and StoppedState useless since the UI will just hang.
 	mu sync.RWMutex
 
 	// Only changed by commands (start, stop, logout).
@@ -141,9 +139,6 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	t.userState = UserEnabled
 	t.notifyUserStateChange(UserEnabled)
 
-	// Set starting state
-	t.setState(StartingState)
-
 	t.log().Debug("Starting tailnet")
 
 	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
@@ -217,7 +212,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	defer t.mu.Unlock()
 
 	switch t.currentState {
-	case ConnectedState, StartedState, StartingState, NeedsLoginState, NeedsMachineAuthState, HasTerminalErrorState:
+	case ConnectedState, StartedState, NeedsLoginState, NeedsMachineAuthState, HasTerminalErrorState:
 		// Allow stopping
 	default:
 		return fmt.Errorf("unable to stop: tailnet is in state %s", t.currentState)
@@ -227,8 +222,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 	t.userState = UserDisabled
 	t.notifyUserStateChange(UserDisabled)
 
-	// Set stopping state
-	t.setState(StoppingState)
 	defer t.setState(StoppedState)
 
 	t.log().Debug("Stopping tailnet")
@@ -301,9 +294,6 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
 	t.notifyUserStateChange(UserDisabled)
-
-	// Set logging out state
-	t.setState(LoggingOutState)
 
 	// Ensure we transition to stopped state at the end
 	defer t.setState(StoppedState)
