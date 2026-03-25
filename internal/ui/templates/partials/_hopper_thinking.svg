@@ -1,0 +1,50 @@
+{{define "_hopper_thinking"}}
+<svg class="hopper-small thinking" viewBox="0 -25 100 150" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bodyGradBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" style="stop-color:#42A5F5;stop-opacity:1" />
+        <stop offset="100%" style="stop-color:#1E88E5;stop-opacity:1" />
+      </linearGradient>
+    </defs>
+    <path d="M 50 85 Q 55 100 50 115" stroke="#64B5F6" stroke-width="4" fill="none" stroke-linecap="round" />
+    <ellipse cx="50" cy="55" rx="22" ry="28" fill="url(#bodyGradBlue)" />
+    <circle cx="50" cy="25" r="18" fill="#64B5F6" />
+    
+    <!-- Eyes looking upward (thinking) -->
+    <circle cx="40" cy="18" r="5" fill="#fff" />
+    <circle cx="40" cy="16" r="3" fill="#1565C0" />
+    <circle cx="40.5" cy="15" r="1" fill="#fff" />
+    <circle cx="60" cy="18" r="5" fill="#fff" />
+    <circle cx="60" cy="16" r="3" fill="#1565C0" />
+    <circle cx="60.5" cy="15" r="1" fill="#fff" />
+    
+    <!-- Raised eyebrows (questioning) -->
+    <path d="M 35 13 Q 40 11 45 13" stroke="#1565C0" stroke-width="1.5" fill="none" stroke-linecap="round" />
+    <path d="M 55 13 Q 60 11 65 13" stroke="#1565C0" stroke-width="1.5" fill="none" stroke-linecap="round" />
+    
+    <!-- Questioning smile -->
+    <path d="M 45 29 Q 50 31 55 29" stroke="#1565C0" stroke-width="1.5" fill="none" stroke-linecap="round" />
+    
+    <!-- Antennae -->
+    <path d="M 38 10 Q 28 5 25 2" stroke="#1565C0" stroke-width="2.5" fill="none" stroke-linecap="round" />
+    <circle cx="25" cy="2" r="2" fill="#1565C0" />
+    <path d="M 62 10 Q 72 5 75 2" stroke="#1565C0" stroke-width="2.5" fill="none" stroke-linecap="round" />
+    <circle cx="75" cy="2" r="2" fill="#1565C0" />
+    
+    <!-- Thought bubble with question mark (top right above head) -->
+    <circle cx="72" cy="-15" r="8" fill="#fff" stroke="#1565C0" stroke-width="1.5" opacity="0.9" />
+    <circle cx="62" cy="-5" r="4" fill="#fff" stroke="#1565C0" stroke-width="1" opacity="0.8" />
+    <circle cx="58" cy="3" r="2.5" fill="#fff" stroke="#1565C0" stroke-width="0.8" opacity="0.7" />
+    <text x="69" y="-11" font-size="10" font-weight="bold" fill="#1565C0" font-family="sans-serif">?</text>
+    
+    <ellipse cx="50" cy="60" rx="14" ry="18" fill="#90CAF9" opacity="0.4" />
+    <g class="legs">
+      <ellipse cx="32" cy="70" rx="3" ry="14" fill="#1565C0" transform="rotate(-25 32 70)" />
+      <ellipse cx="68" cy="70" rx="3" ry="14" fill="#1565C0" transform="rotate(25 68 70)" />
+    </g>
+    <g class="back-legs">
+      <ellipse cx="28" cy="78" rx="3" ry="16" fill="#1565C0" transform="rotate(-35 28 78)" />
+      <ellipse cx="72" cy="78" rx="3" ry="16" fill="#1565C0" transform="rotate(35 72 78)" />
+    </g>
+</svg>
+{{end}}

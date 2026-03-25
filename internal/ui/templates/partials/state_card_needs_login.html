@@ -1,0 +1,12 @@
+{{define "state_card_needs_login"}}
+  <!-- Login Required State Card -->
+  <div class="state-body">
+    <div class="hopper-small-container" hx-preserve>
+      {{template "_hopper_thinking" .}}
+    </div>
+    <p class="state-message">Authentication required</p>
+    <div class="state-actions">
+      <a href="{{.AuthURL}}" target="_blank" class="login-button">Login with Tailscale</a>
+    </div>
+  </div>
+{{end}}

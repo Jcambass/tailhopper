@@ -1,0 +1,6 @@
+{{define "toast"}}
+<div id="toast-slot" hx-swap-oob="true">
+  <div class="toast toast-{{.Type}} show" hx-get="/api/noop" hx-trigger="load delay:5s" hx-swap="outerHTML">{{.Message}}</div>
+  <div id="toast-slot"></div>
+</div>
+{{end}}

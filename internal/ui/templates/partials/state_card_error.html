@@ -1,0 +1,18 @@
+{{define "state_card_error"}}
+  <!-- Error State Card -->
+  <div class="state-body">
+    <div class="hopper-small-container" hx-preserve>
+      {{template "_hopper_red" .}}
+    </div>
+    <p class="state-message">Critical error</p>
+    <p class="state-error-details">{{.ErrorMsg}}</p>
+    <p class="state-note">Please delete this tailnet and log in to a different tailnet.</p>
+    <div class="state-actions">
+      <button
+        class="admin-button delete-button"
+        hx-delete="/tailnet/{{.ID}}"
+        hx-confirm="Are you sure you want to delete this tailnet? This action cannot be undone."
+      >Delete Tailnet</button>
+    </div>
+  </div>
+{{end}}

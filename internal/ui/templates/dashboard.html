@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tailhopper Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/ui.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/idiomorph-ext.min.js"></script>
+  <script src="/static/sse.js"></script>
+  <script src="/static/ui.js" defer></script>
+</head>
+<body hx-ext="morph,sse" sse-connect="/events">
+  <!-- Toast notification system -->
+  <div class="toast-container">
+    <div id="toast-slot"></div>
+  </div>
+  
+  <div class="dashboard-header">
+    <svg class="hopper-icon" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bodyGradStatic" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" style="stop-color:#7CB342;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#558B2F;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      
+      <!-- Tail -->
+      <path d="M 50 85 Q 55 100 50 115" stroke="#9CCC65" stroke-width="4" fill="none" stroke-linecap="round" />
+      
+      <!-- Main body (rounded) -->
+      <ellipse cx="50" cy="55" rx="22" ry="28" fill="url(#bodyGradStatic)" />
+      
+      <!-- Head -->
+      <circle cx="50" cy="25" r="18" fill="#9CCC65" />
+      
+      <!-- Left eye -->
+      <circle cx="40" cy="20" r="5" fill="#fff" />
+      <circle cx="40" cy="20" r="3" fill="#2E7D32" />
+      <circle cx="41" cy="19" r="1" fill="#fff" />
+      
+      <!-- Right eye -->z
+      <circle cx="60" cy="20" r="5" fill="#fff" />
+      <circle cx="60" cy="20" r="3" fill="#2E7D32" />
+      <circle cx="61" cy="19" r="1" fill="#fff" />
+      
+      <!-- Smile -->
+      <path d="M 45 28 Q 50 32 55 28" stroke="#558B2F" stroke-width="1.5" fill="none" stroke-linecap="round" />
+      
+      <!-- Left antenna -->
+      <path d="M 38 10 Q 28 5 25 2" stroke="#558B2F" stroke-width="2.5" fill="none" stroke-linecap="round" />
+      <circle cx="25" cy="2" r="2" fill="#558B2F" />
+      
+      <!-- Right antenna -->
+      <path d="M 62 10 Q 72 5 75 2" stroke="#558B2F" stroke-width="2.5" fill="none" stroke-linecap="round" />
+      <circle cx="75" cy="2" r="2" fill="#558B2F" />
+      
+      <!-- Belly patch -->
+      <ellipse cx="50" cy="60" rx="14" ry="18" fill="#AED581" opacity="0.4" />
+      
+      <!-- Front legs (stationary) -->
+      <g class="legs">
+        <ellipse cx="32" cy="70" rx="3" ry="14" fill="#558B2F" rx="3" ry="14" transform="rotate(-25 32 70)" />
+        <ellipse cx="68" cy="70" rx="3" ry="14" fill="#558B2F" rx="3" ry="14" transform="rotate(25 68 70)" />
+      </g>
+      
+      <!-- Back legs (animated on hover) -->
+      <g class="back-legs">
+        <g class="back-leg left">
+          <ellipse cx="28" cy="82" rx="3" ry="16" fill="#558B2F" transform="rotate(-35 28 82)" />
+        </g>
+        <g class="back-leg right">
+          <ellipse cx="72" cy="82" rx="3" ry="16" fill="#558B2F" transform="rotate(35 72 82)" />
+        </g>
+      </g>
+    </svg>
+    <div class="header-text">
+      <h1>Tailhopper Dashboard</h1>
+    </div>
+  </div>
+
+  <!-- SOCKS5 Proxy Setup Section -->
+  <div class="setup-section">
+    <h2>🔌 SOCKS5 Proxy Setup</h2>
+    <div class="setup-grid">
+      <div class="setup-card">
+        <h3>Option 1: PAC File (Recommended)</h3>
+        <p>Configure your browser to use <a href="https://en.wikipedia.org/wiki/Proxy_auto-config" target="_blank">automatic proxy configuration</a>:</p>
+        <div class="code-block">
+          <code id="pac-url">http://localhost:8888{{.PACFileURL}}</code>
+          <button class="copy-btn" onclick="copyToClipboard('pac-url')" title="Copy to clipboard">
+            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+        <p class="setup-note">Automatically routes each request to the correct tailnet proxy based on the domain.</p>
+        <details class="setup-info">
+          <summary><strong>How to configure PAC</strong></summary>
+          <ul class="setup-pac-steps">
+            <li><strong>macOS</strong> Follow the <a href="https://support.apple.com/en-gb/guide/mac-help/mchlp2591/mac#:~:text=Automatic%20proxy%20configuration" target="_blank" rel="noopener noreferrer">Automatic Proxy Configuration</a> instructions in System Settings and paste the URL above. Safari, Chrome, and most other browsers automatically use these system-wide settings.</li>
+            <li><strong>Windows</strong> In <a href="https://support.microsoft.com/en-us/windows/use-a-proxy-server-in-windows-03096c53-0554-4ffe-b6ab-8b1deee8dae1" target="_blank" rel="noopener noreferrer">Use a proxy server in Windows</a>, follow the <em>To set up a proxy server using a setup script</em> section and paste the URL above. Chrome, Edge, and most browsers automatically use these system-wide settings.</li>
+            <li><strong>Firefox</strong> Firefox manages its own proxy settings independently of the OS. See <a href="https://support.mozilla.org/en-US/kb/connection-settings-firefox" target="_blank" rel="noopener noreferrer">Connection settings in Firefox</a> — select <em>Automatic proxy configuration URL</em> and paste the URL above.</li>
+          </ul>
+        </details>
+        <details class="setup-warning">
+          <summary><strong>Troubleshooting PAC issues</strong></summary>
+          <p>Most browsers cache PAC files for multiple hours. Known solutions:</p>
+          <ul class="setup-pac-steps">
+            <li><strong>Chrome</strong> Chrome always uses system-level PAC settings. To force a refresh: paste <span class="setup-inline-url">chrome://net-internals/#proxy</span> into the address bar and click <em>Re-apply settings</em>.</li>
+            <li><strong>Safari &amp; other browsers using macOS system-wide PAC</strong> In <a href="https://support.apple.com/en-gb/guide/mac-help/mchlp2591/mac#:~:text=Automatic%20proxy%20configuration" target="_blank" rel="noopener noreferrer">macOS proxy settings</a>, disable Automatic Proxy Configuration and save, then re-enable it and save again.</li>
+          </ul>
+          <p>For other browsers or operating systems there is no guaranteed fix — looking up browser-specific instructions may help.</p>
+        </details>
+      </div>
+      <div class="setup-card">
+        <h3>Option 2: Manual SOCKS5</h3>
+        <p>Configure SOCKS5 proxy directly in your browser/app.</p>
+        <p class="setup-note">Required for non-HTTP traffic (SSH, databases, etc.) or apps that don't support PAC files.</p>
+        <p class="setup-note">Each connected tailnet card below shows its proxy host and port.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tailnets section -->
+  <div id="tailnets-container" hx-trigger="sse:global" hx-get="/" hx-select="#tailnets-container" hx-swap="morph">
+
+    {{range .Tailnets}}
+  <div class="tailnet-card{{if eq .StateClass "error"}} tailnet-card-error{{end}}" id="tailnet-card-{{.ID}}" hx-trigger="sse:tailnet-{{.ID}}" hx-get="/" hx-select="#tailnet-card-{{.ID}}" hx-swap="morph">
+    <div class="tailnet-header">
+      {{template "tailnet_header" .}}
+    </div>
+
+    {{if eq .StateClass "error"}}
+    <div id="card-body-{{.ID}}">
+      {{template "state_card_error" .}}
+    </div>
+    {{else}}
+    <!-- Tab Navigation -->
+    <div class="tabs-container">
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-tailnet-{{.ID}}" class="tab-input" checked>
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-proxy-{{.ID}}" class="tab-input">
+      <input type="radio" name="tab-{{.ID}}" id="tab-input-admin-{{.ID}}" class="tab-input">
+      
+      <div class="tabs" id="tabs-{{.ID}}">
+        <label for="tab-input-tailnet-{{.ID}}" class="tab-btn">Tailnet</label>
+        <label for="tab-input-proxy-{{.ID}}" class="tab-btn">Proxy</label>
+        <label for="tab-input-admin-{{.ID}}" class="tab-btn">Admin</label>
+      </div>
+      
+      <div id="content-area-{{.ID}}">
+        <!-- Tailnet Tab -->
+        <div class="tab-content" data-tab="tailnet">
+          <div id="card-body-{{.ID}}">
+          {{if eq .StateClass "connected"}}
+          <!-- connected state: show machines list -->
+          <div class="tailnet-section-header">
+            <div class="tailnet-section-title">Machines</div>
+          </div>
+          {{template "machines" .}}
+          {{else}}
+          <!-- Non-connected state: show state card -->
+          {{if eq .StateClass "disabled"}}
+            {{template "state_card_disabled" .}}
+          {{else if eq .StateClass "connecting"}}
+            {{template "state_card_connecting" .}}
+          {{else if eq .StateClass "needs-login"}}
+            {{template "state_card_needs_login" .}}
+          {{else if eq .StateClass "needs-auth"}}
+            {{template "state_card_needs_auth" .}}
+          {{else if eq .StateClass "error"}}
+            {{template "state_card_error" .}}
+          {{else if eq .StateClass "logging-out"}}
+            {{template "state_card_logging_out" .}}
+          {{end}}
+          {{end}}
+          </div>
+        </div>
+        
+        <!-- Proxy Tab -->
+        <div class="tab-content" data-tab="proxy">
+        {{if eq .StateClass "connected"}}
+          {{template "socks_panel" .}}
+        {{else}}
+          <div class="state-body">
+            <p class="state-message">Proxy information available when connected</p>
+          </div>
+        {{end}}
+        </div>
+        
+        <!-- Admin Tab -->
+        <div class="tab-content" data-tab="admin">
+          <div class="admin-panel">
+            <div class="admin-section">
+              <h3 class="admin-section-title">Danger Zone</h3>
+              <button 
+              class="admin-button delete-button" 
+              hx-delete="/tailnet/{{.ID}}" 
+              hx-confirm="Are you sure you want to delete this tailnet? This action cannot be undone."
+            >Delete Tailnet</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <!-- Add New Tailnet Card -->
+  {{if not .HasUnconfiguredTailnets}}
+  {{template "add_tailnet" . }}
+  {{end}}
+  </div>
+</body>
+</html>

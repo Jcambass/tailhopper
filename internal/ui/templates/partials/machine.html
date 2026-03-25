@@ -1,0 +1,14 @@
+{{define "machine"}}
+<div class="machine">
+  <div class="machine-header">
+    <div class="machine-info">
+      <div class="machine-name">
+        <span class="machine-status-dot {{.StatusClass}}"></span>
+        {{.Name}}
+      </div>
+      <div class="machine-dns">{{.DNSName}}</div>
+    </div>
+  </div>
+  <div class="machine-addrs">IPs: {{.IPs}}</div>
+</div>
+{{end}}

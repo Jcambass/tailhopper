@@ -1,0 +1,29 @@
+{{define "add_tailnet"}}
+  <!-- Add New Tailnet Card -->
+  <div class="tailnet-card add-tailnet-card">
+    <div class="add-tailnet-body">
+      <div class="add-tailnet-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="16"/>
+          <line x1="8" y1="12" x2="16" y2="12"/>
+        </svg>
+      </div>
+      {{if .HasTailnets}}
+        <h3 class="add-tailnet-title">Need More?</h3>
+        <p class="add-tailnet-description">Connect an additional Tailnet</p>
+      {{else}}
+        <h3 class="add-tailnet-title">Get Started</h3>
+        <p class="add-tailnet-description">Connect your first Tailnet to get started</p>
+      {{end}}
+      <button 
+        type="button"
+        class="add-tailnet-button"
+        hx-post="/tailnet/add"
+        hx-swap="none"
+      >
+        Connect Tailnet
+      </button>
+    </div>
+  </div>
+{{end}}
