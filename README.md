@@ -46,7 +46,7 @@ Once running, open the dashboard at **http://localhost:8888**.
 
 From there you can:
 
-- Add Tailnets and authenticate them via the Tailscale login URL printed on first start
+- Add Tailnets and authenticate them via the Tailscale
 - Enable/disable individual Tailnets
 - Configure your browser or OS to use the PAC file for automatic proxy routing — see the in-app **How to configure PAC** section for OS- and browser-specific instructions
 - Alternatively, configure a SOCKS5 proxy manually per-app using the host and port shown on each connected Tailnet's card (useful for non-HTTP traffic or apps that don't support PAC files)
