@@ -50,7 +50,7 @@ func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcas
 
 	// Dashboard
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		ui.ServeDashboard(w, r, reg)
+		ui.ServeDashboard(w, r, reg, addr)
 	})
 
 	// API endpoints

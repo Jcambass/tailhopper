@@ -13,12 +13,12 @@ import (
 )
 
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Registry) {
+func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Registry, listenAddr string) {
 	ctx := r.Context()
 
 	// Base data structure
 	data := dashboardData{
-		PACFileURL:              pac.URLPath,
+		PACFileURL:              "http://" + listenAddr + pac.URLPath,
 		Tailnets:                []tailnetCard{},
 		HasUnconfiguredTailnets: reg.HasUnconfiguredTailnets(),
 		HasTailnets:             false,
