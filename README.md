@@ -63,7 +63,7 @@ cd tailhopper
 ./macos/install.sh
 ```
 
-The script requires [Go](https://go.dev) to be installed. After installation, the dashboard is available at http://localhost:8888.
+The script requires [Go](https://go.dev) to be installed. During installation it prompts for the dashboard/PAC port and defaults to `8888`, so the dashboard is typically available at `http://localhost:8888` unless you choose a different port.
 
 **Useful commands installed alongside the binary:**
 

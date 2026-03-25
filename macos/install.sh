@@ -18,15 +18,32 @@ PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 # Get home directory
 HOME_DIR="$HOME"
 PLIST_FILE="$HOME_DIR/Library/LaunchAgents/com.tailhopper.plist"
+DEFAULT_HTTP_PORT="8888"
 
 # Installation directory
 INSTALL_DIR="$HOME_DIR/.local/bin"
+
+validate_port() {
+    local port="$1"
+
+    if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        return 1
+    fi
+
+    return 0
+}
 
 # Check if already installed
 IS_INSTALLED=false
 if [ -f "$INSTALL_DIR/tailhopper" ]; then
     IS_INSTALLED=true
 fi
+
+HTTP_PORT="$DEFAULT_HTTP_PORT"
 
 if [ "$IS_INSTALLED" = true ]; then
     echo -e "${YELLOW}⚠ Existing installation found. Updating...${NC}"
@@ -42,6 +59,21 @@ else
     echo -e "${YELLOW}Fresh installation${NC}"
     echo ""
 fi
+
+while true; do
+    read -r -p "Dashboard port [$DEFAULT_HTTP_PORT] (press Enter to use default): " INPUT_PORT
+    HTTP_PORT="${INPUT_PORT:-$DEFAULT_HTTP_PORT}"
+
+    if ! validate_port "$HTTP_PORT"; then
+        echo -e "${RED}Error: Please enter a valid port number between 1 and 65535.${NC}"
+        continue
+    fi
+
+    break
+done
+
+echo -e "${YELLOW}Dashboard port:${NC} $HTTP_PORT"
+echo ""
 
 # Create directories
 echo -e "${YELLOW}Creating directories...${NC}"
@@ -100,7 +132,10 @@ LAUNCH_AGENTS_DIR="$HOME_DIR/Library/LaunchAgents"
 mkdir -p "$LAUNCH_AGENTS_DIR"
 
 # Read the template plist and substitute variables
-sed "s|{{HOME}}|$HOME_DIR|g" "$SCRIPT_DIR/com.tailhopper.plist" > "$PLIST_FILE"
+sed \
+    -e "s|{{HOME}}|$HOME_DIR|g" \
+    -e "s|{{HTTP_PORT}}|$HTTP_PORT|g" \
+    "$SCRIPT_DIR/com.tailhopper.plist" > "$PLIST_FILE"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Plist installed to: ${YELLOW}$PLIST_FILE${NC}"
@@ -128,7 +163,7 @@ else
     echo -e "${GREEN}Installation complete!${NC}"
 fi
 echo ""
-echo -e "${YELLOW}Access the dashboard at: http://localhost:8888${NC}"
+echo -e "${YELLOW}Access the dashboard at: http://localhost:${HTTP_PORT}${NC}"
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"
 echo "  View logs:      tailhopper-logs"
