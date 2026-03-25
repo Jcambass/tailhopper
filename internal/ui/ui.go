@@ -65,7 +65,9 @@ func RenderToast(toastType, message string) (string, error) {
 
 // dashboardData contains all data needed to render the dashboard.
 type dashboardData struct {
-	PACFileURL              string
+	PACFileURL              string // PAC URL derived from the incoming request (reflects reverse proxy)
+	DirectPACFileURL        string // PAC URL using the actual listen address
+	HasMultiplePACURLs      bool   // true when the two URLs differ (i.e. behind a reverse proxy)
 	Tailnets                []tailnetCard
 	HasUnconfiguredTailnets bool
 	HasTailnets             bool

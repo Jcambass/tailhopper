@@ -12,13 +12,40 @@ import (
 	"github.com/jcambass/tailhopper/internal/ts"
 )
 
+// requestPACFileURL builds the full PAC file URL from the incoming request,
+// respecting X-Forwarded-Host and X-Forwarded-Proto headers set by
+// reverse proxies.
+func requestPACFileURL(r *http.Request) string {
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	return scheme + "://" + host + pac.URLPath
+}
+
 // ServeDashboard renders the main dashboard page.
-func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Registry) {
+// listenAddr is the actual host:port the server is listening on.
+func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Registry, listenAddr string) {
 	ctx := r.Context()
+
+	requestURL := requestPACFileURL(r)
+	directURL := "http://" + listenAddr + pac.URLPath
 
 	// Base data structure
 	data := dashboardData{
-		PACFileURL:              pac.URLPath,
+		PACFileURL:              requestURL,
+		DirectPACFileURL:        directURL,
+		HasMultiplePACURLs:      requestURL != directURL,
 		Tailnets:                []tailnetCard{},
 		HasUnconfiguredTailnets: reg.HasUnconfiguredTailnets(),
 		HasTailnets:             false,

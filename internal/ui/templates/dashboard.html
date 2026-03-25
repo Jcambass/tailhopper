@@ -87,13 +87,32 @@
       <div class="setup-card">
         <h3>Option 1: PAC File (Recommended)</h3>
         <p>Configure your browser to use <a href="https://en.wikipedia.org/wiki/Proxy_auto-config" target="_blank">automatic proxy configuration</a>:</p>
+        {{if .HasMultiplePACURLs}}
+        <p class="setup-note pac-url-label">Via reverse proxy:</p>
         <div class="code-block">
-          <code id="pac-url">http://localhost:8888{{.PACFileURL}}</code>
+          <code id="pac-url">{{.PACFileURL}}</code>
           <button class="copy-btn" onclick="copyToClipboard('pac-url')" title="Copy to clipboard">
             <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </button>
         </div>
+        <p class="setup-note pac-url-label">Direct:</p>
+        <div class="code-block">
+          <code id="pac-url-direct">{{.DirectPACFileURL}}</code>
+          <button class="copy-btn" onclick="copyToClipboard('pac-url-direct')" title="Copy to clipboard">
+            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+        {{else}}
+        <div class="code-block">
+          <code id="pac-url">{{.PACFileURL}}</code>
+          <button class="copy-btn" onclick="copyToClipboard('pac-url')" title="Copy to clipboard">
+            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+        {{end}}
         <p class="setup-note">Automatically routes each request to the correct tailnet proxy based on the domain.</p>
         <details class="setup-info">
           <summary><strong>How to configure PAC</strong></summary>
