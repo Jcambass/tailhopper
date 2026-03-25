@@ -19,12 +19,11 @@ Tailhopper lets you stay connected to multiple Tailnets at once, without touchin
 
 ## What it does
 
-- Manage multiple Tailnets from a single web dashboard
+- Single web dashboard to manage your additional Tailnets
 - Works alongside your existing Tailscale connection — your primary Tailnet is unaffected
 - Automatic proxy routing via PAC file — no per-request configuration needed
-- Each Tailnet gets its own SOCKS5 proxy port
+- Manual per Tailnet SOCKS5 proxy option for apps that don't support PAC or for non-HTTP traffic
 - Runs as a background service on macOS (auto-starts at login, auto-restarts on crash)
-- Real-time dashboard updates via SSE
 
 ## How it works
 
@@ -32,7 +31,7 @@ Tailhopper connects to each Tailnet using [tsnet](https://pkg.go.dev/tailscale.c
 
 **PAC file (recommended for browsers)** — Tailhopper serves a [PAC file](https://en.wikipedia.org/wiki/Proxy_auto-config) that maps each Tailnet's MagicDNS suffix to the corresponding SOCKS5 proxy. Configure your browser or OS to use the PAC file once, and every request is automatically sent to the right proxy based on the destination hostname — with no manual switching needed, even when accessing multiple Tailnets in the same browser session.
 
-**Direct SOCKS5 (per Tailnet)** — Each Tailnet's proxy can also be configured directly in any app that supports SOCKS5. This is useful for non-HTTP traffic (SSH, database clients, etc.) or apps that don't support PAC. Because each proxy represents exactly one Tailnet, an app configured to use a specific proxy can only reach that one Tailnet at a time — unlike the PAC approach, there is no automatic multi-Tailnet routing.
+**Direct SOCKS5 (per Tailnet)** — Each Tailnet's proxy can also be configured directly in any app that supports SOCKS5. This is useful for non-HTTP traffic (SSH, database clients, etc.) or apps that don't respect the systems PAC setting. Because each proxy represents exactly one Tailnet, an app configured to use a specific proxy can only reach that one Tailnet at a time — unlike the PAC approach, there is no automatic multi-Tailnet routing.
 
 ## Limitations
 
@@ -47,9 +46,9 @@ Once running, open the dashboard at **http://localhost:8888**.
 From there you can:
 
 - Add Tailnets and authenticate them via the Tailscale
-- Enable/disable individual Tailnets
+- Temporarily enable/disable individual Tailnets
 - Configure your browser or OS to use the PAC file for automatic proxy routing — see the in-app **How to configure PAC** section for OS- and browser-specific instructions
-- Alternatively, configure a SOCKS5 proxy manually per-app using the host and port shown on each connected Tailnet's card (useful for non-HTTP traffic or apps that don't support PAC files)
+- Alternatively, configure a SOCKS5 proxy manually per-app using the host and port shown on each connected Tailnet's card (useful for non-HTTP traffic or apps that don't respect system wide PAC settings)
 
 ## Installation
 
