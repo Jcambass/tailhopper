@@ -123,7 +123,7 @@ Releases are automated via [GoReleaser](https://goreleaser.com). When you push a
 3. Generates the Homebrew cask and publishes it (adding to the top level `Casks` directory in this repo and committing the changes)
 
 ### To release:
-cat dist/homebrew/Casks/tailhopper.rb
+
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
@@ -155,8 +155,6 @@ Users can install via:
 brew tap jcambass/tailhopper
 brew install tailhopper
 ```
-
-
 
 ## Build
 
