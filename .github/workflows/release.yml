@@ -58,6 +58,8 @@ jobs:
           formula-path: Formula/tailhopper.rb
           homebrew-tap: jcambass/homebrew-tap
           base-branch: main
+          create-pullrequest: true
+          create-branch: true
           tag-name: ${{ github.ref_name }}
           commit-message: |
             {{formulaName}} {{version}}
