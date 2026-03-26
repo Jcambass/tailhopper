@@ -4,6 +4,7 @@ package ui
 import (
 	"embed"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -115,7 +116,8 @@ func (c tailnetCard) StateClass() StateClass {
 	case tailscale.LoggingOutState:
 		return StateClassLoggingOut
 	default:
-		panic("unexpected state name: " + string(c.stateName))
+		slog.Error("unknown tailnet state, rendering as disabled", slog.String("component", "ui"), slog.String("state", string(c.stateName)))
+		return StateClassDisabled
 	}
 }
 

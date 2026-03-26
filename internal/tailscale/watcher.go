@@ -24,6 +24,12 @@ type watcher struct {
 	onState     func(context.Context, IPNState)
 }
 
+// watcherShutdownTimeout is how long Close waits for the watcher goroutine to
+// exit after cancelling its context. If the goroutine is stuck in a blocking
+// WatchIPNBus or Next call, we log an error and return rather than block
+// indefinitely.
+const watcherShutdownTimeout = 5 * time.Second
+
 // NewWatcher creates and starts a new IPN bus watcher.
 // The caller must call Close() to clean up resources.
 func NewWatcher(localClient tsnetpkg.LocalClient, onState func(context.Context, IPNState), tailnetID int) (*watcher, error) {
@@ -55,12 +61,12 @@ func (w *watcher) start() error {
 		defer w.logger.Debug("IPN watcher goroutine exiting")
 
 		watcher, err := w.localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
+		if err != nil && ctx.Err() != nil {
+			w.logger.Debug("IPN watcher canceled before subscription was established", slog.Any("error", err))
+			return
+		}
 		if err != nil {
-			if ctx.Err() != nil {
-				w.logger.Debug("IPN watcher canceled before subscription was established", slog.Any("error", err))
-			} else {
-				w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
-			}
+			w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
 			return
 		}
 		defer func() {
@@ -71,13 +77,12 @@ func (w *watcher) start() error {
 
 		for {
 			n, err := watcher.Next()
+			if err != nil && ctx.Err() != nil {
+				w.logger.Debug("IPN watcher stopped", slog.Any("error", err))
+				return
+			}
 			if err != nil {
-				if ctx.Err() != nil {
-					w.logger.Debug("IPN watcher stopped", slog.Any("error", err))
-				} else {
-					w.logger.Warn("IPN watcher error", slog.Any("error", err))
-				}
-
+				w.logger.Warn("IPN watcher error", slog.Any("error", err))
 				return
 			}
 
@@ -114,7 +119,7 @@ func (w *watcher) Close() error {
 	select {
 	case <-done:
 		w.logger.Debug("IPN watcher stopped successfully")
-	case <-time.After(5 * time.Second):
+	case <-time.After(watcherShutdownTimeout):
 		w.logger.Error("IPN watcher shutdown timeout - goroutine did not exit")
 	}
 	return nil

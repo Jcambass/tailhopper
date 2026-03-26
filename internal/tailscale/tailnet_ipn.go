@@ -79,6 +79,8 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 	t.mu.Unlock()
 
+	// Run cleanup outside the lock: closing the server, watcher, and SOCKS proxy
+	// involves blocking I/O that must not hold mu.
 	terminalCleanup.run(t)
 
 	// Notify after releasing lock to keep lock time minimal.
@@ -90,6 +92,8 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 // Locked helpers below: require t.mu to be held by caller.
 
 func (t *Tailnet) maybeClaimMagicDNSSuffixLocked(ipnState IPNState) bool {
+	// Guard: both suffixes are set but differ — the tailnet was moved to a
+	// different account or the suffix changed underneath us.
 	if ipnState.MagicDNSSuffix != "" && t.claimedMagicDNSSuffix != "" && ipnState.MagicDNSSuffix != t.claimedMagicDNSSuffix {
 		// TODO: Handle case where the MagicDNS suffix changes while we're running.
 		t.log().Error("MagicDNS suffix changed unexpectedly", slog.String("old_suffix", t.claimedMagicDNSSuffix), slog.String("new_suffix", ipnState.MagicDNSSuffix))

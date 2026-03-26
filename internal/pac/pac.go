@@ -43,6 +43,9 @@ func buildPACForTailnets(tailnets []*tailscale.Tailnet) (string, []string) {
 		socksAddr := t.SocksAddr()
 
 		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", suffix))
+		// PAC fallback chain: browsers try each entry in order.
+		// SOCKS5 (RFC 1928) is preferred; SOCKS (v4) is a fallback for
+		// older clients; DIRECT ensures connectivity if the proxy is down.
 		sb.WriteString(fmt.Sprintf("        return \"SOCKS5 %s; SOCKS %s; DIRECT\";\n", socksAddr, socksAddr))
 		sb.WriteString("    }\n")
 	}

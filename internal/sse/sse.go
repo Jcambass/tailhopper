@@ -13,6 +13,11 @@ type Broadcaster interface {
 	BroadcastGlobalChange()
 }
 
+// subscriberBufferSize is the per-subscriber channel capacity. When a
+// subscriber's buffer is full, new events are dropped and a warning is logged.
+// 10 is generous for an SSE UI that sends one event per state change.
+const subscriberBufferSize = 10
+
 // SSEBroadcaster manages Server-Sent Events subscriptions and broadcasts.
 type SSEBroadcaster struct {
 	mu          sync.RWMutex
@@ -35,7 +40,7 @@ func (b *SSEBroadcaster) Subscribe(ctx context.Context) (string, <-chan string) 
 	b.mu.Lock()
 	id := fmt.Sprintf("client-%d", b.nextClient)
 	b.nextClient++
-	ch := make(chan string, 10) // Buffer to prevent blocking
+	ch := make(chan string, subscriberBufferSize) // Buffer to prevent blocking
 	b.subscribers[id] = ch
 	b.mu.Unlock()
 

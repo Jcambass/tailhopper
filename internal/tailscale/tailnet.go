@@ -143,73 +143,74 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	t.log().Debug("Starting tailnet")
 
-	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
-	socksProxy, err := socks.NewServer(t.Dial, t.socksPort)
-	if err != nil {
-		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
-		// At this point we haven't started any long-running processes, so we can just return the error without worrying about cleanup.
+	// Track started components; the deferred cleanup closes them on failure.
+	var (
+		proxy         *socks.Server
+		server        tsnetpkg.TSNetServer
+		serverStarted bool
+	)
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		if proxy != nil {
+			if err := proxy.Close(); err != nil {
+				t.log().Error("cleanup: failed to close SOCKS5 proxy", slog.Any("error", err))
+			}
+		}
+		if serverStarted {
+			if err := server.Close(); err != nil {
+				t.log().Error("cleanup: failed to close tsnet server", slog.Any("error", err))
+			}
+		}
 		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
 		t.setState(StoppedState)
+	}()
+
+	t.log().Debug("Starting SOCKS5 proxy", slog.Int("port", t.socksPort))
+	var err error
+	proxy, err = socks.NewServer(t.Dial, t.socksPort)
+	if err != nil {
+		t.log().Error("failed to start SOCKS5 proxy", slog.Any("error", err))
 		return err
 	}
-	socksProxy.Start()
+	proxy.Start()
 
-	// Asynchronously start the server
 	t.log().Debug("Starting tsnet server")
-
-	server := t.newServer(tsnetpkg.TSNetServerConfig{
+	server = t.newServer(tsnetpkg.TSNetServerConfig{
 		Dir:      t.tsnetStateDir,
 		Hostname: t.userSetHostname,
 		Logf:     t.tsnetLogf(slog.LevelDebug),
 		UserLogf: t.tsnetLogf(slog.LevelInfo),
 	})
-
-	err = server.Start()
-	if err != nil {
+	if err = server.Start(); err != nil {
 		t.log().Error("failed to start tsnet server", slog.Any("error", err))
-		// If we fail to start the server, we should stop the socks proxy that we started since they won't be functional without the server.
-
-		closeErr := socksProxy.Close()
-		if closeErr != nil {
-			t.log().Error("failed to close SOCKS5 proxy after server start failure", slog.Any("error", closeErr))
-		}
-		// TODO: Give some UI feedback that the server failed to start and the tailnet is non-functional, since the user might not understand why it's auto stopping.
-		t.setState(StoppedState)
 		return err
 	}
+	serverStarted = true
 
 	lc, err := server.LocalClient()
 	if err != nil {
 		t.log().Error("failed to get LocalClient for watcher", slog.Any("error", err))
-		closeErr := socksProxy.Close()
-		if closeErr != nil {
-			t.log().Error("failed to close SOCKS5 proxy after LocalClient failure", slog.Any("error", closeErr))
-		}
-		err = server.Close()
-		if err != nil {
-			t.log().Error("failed to close tsnet server after LocalClient failure", slog.Any("error", err))
-		}
-		t.setState(StoppedState)
 		return err
 	}
 
-	// start IPN watcher to observe state changes
+	// Start IPN watcher to observe state changes.
+	// Since this function holds the mu lock, the watcher won't be able to trigger
+	// any state changes until after Start returns, so it's safe to start it here.
 	t.log().Debug("Starting IPN watcher")
-
-	// We start the watcher before entering the StartedState.
-	// Since this function holds the mu lock, the watcher won't be able to trigger any state changes until after Start returns,
-	// so it's safe to start it here before the state transition.
-	watcher, err := NewWatcher(lc, t.reactToIPNStateChange, t.id)
+	w, err := NewWatcher(lc, t.reactToIPNStateChange, t.id)
 	if err != nil {
 		return err
 	}
 
 	// Assign all fields before entering StartedState to prevent accessing them before they're set.
 	t.server = server
-	t.watcher = watcher
-	t.socksProxy = socksProxy
-
+	t.watcher = w
+	t.socksProxy = proxy
 	t.setState(StartedState)
+	success = true
 
 	return nil
 }
@@ -408,20 +409,7 @@ func parseLogKeyValues(msg string) ([]slog.Attr, string) {
 
 	for _, token := range strings.Fields(msg) {
 		key, val, found := strings.Cut(token, "=")
-		if !found || key == "" {
-			cleanParts = append(cleanParts, token)
-			continue
-		}
-
-		// Check if key contains only allowed characters
-		validKey := true
-		for _, r := range key {
-			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
-				validKey = false
-				break
-			}
-		}
-		if !validKey {
+		if !found || key == "" || !isValidLogKey(key) {
 			cleanParts = append(cleanParts, token)
 			continue
 		}
@@ -429,4 +417,15 @@ func parseLogKeyValues(msg string) ([]slog.Attr, string) {
 		attrs = append(attrs, slog.String(key, val))
 	}
 	return attrs, strings.Join(cleanParts, " ")
+}
+
+// isValidLogKey reports whether key contains only alphanumeric characters,
+// underscores, hyphens, and dots (i.e. valid structured-log key characters).
+func isValidLogKey(key string) bool {
+	for _, r := range key {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
