@@ -5,6 +5,19 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Which release task to run
+        required: true
+        default: snapshot
+        type: choice
+        options:
+          - snapshot
+          - homebrew
+      tag-name:
+        description: Release tag to use when mode=homebrew (for example v0.1.0)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -35,7 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser snapshot (manual)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'snapshot'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -46,8 +59,9 @@ jobs:
 
   homebrew:
     name: Bump Homebrew formula
-    if: github.event_name != 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    needs: goreleaser
+    if: |
+      (github.event_name != 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'homebrew' && startsWith(github.event.inputs.tag-name, 'v') && !contains(github.event.inputs.tag-name, '-'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -60,7 +74,7 @@ jobs:
           base-branch: main
           create-pullrequest: true
           create-branch: true
-          tag-name: ${{ github.ref_name }}
+          tag-name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag-name || github.ref_name }}
           commit-message: |
             {{formulaName}} {{version}}
 

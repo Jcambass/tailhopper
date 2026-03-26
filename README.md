@@ -177,6 +177,15 @@ The workflow requires a `TAP_PR_WRITER` secret with the following permissions on
 - Contents: Read and write (needed to create branches / push commits).
 - Pull requests: Read and write (needed to open/manage PRs)
 
+### Run the Homebrew update manually
+
+You can also run just the Homebrew update from the GitHub Actions UI using:
+
+- `mode = homebrew`
+- `tag-name = v0.1.0`
+
+This is useful if the release already exists and you need to re-run the tap PR creation.
+
 ### Validate release pipeline locally
 
 Run a full local snapshot release (no publish):
