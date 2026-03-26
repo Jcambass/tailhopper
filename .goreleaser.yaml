@@ -1,0 +1,72 @@
+version: 2
+
+project_name: tailhopper
+
+builds:
+  - id: linux
+    main: ./cmd/tailhopper
+    binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: darwin
+    main: ./cmd/tailhopper
+    binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: windows
+    main: ./cmd/tailhopper
+    binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: linux-archive
+    ids: [linux]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - linux/tailhopper.service
+      - linux/install-tar.sh
+
+  - id: darwin-archive
+    ids: [darwin]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: windows-archive
+    ids: [windows]
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "sha256sum.txt"
+
+release:
+  github:
+    owner: jcambass
+    name: tailhopper
+
+

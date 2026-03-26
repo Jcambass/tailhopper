@@ -52,49 +52,87 @@ From there you can:
 
 ## Installation
 
-### macOS (recommended)
+### macOS
 
-The install script builds the binary, registers it as a LaunchAgent (starts at login, restarts on crash), and creates helper commands:
-
-```bash
-git clone https://github.com/jcambass/tailhopper.git
-cd tailhopper
-./macos/install.sh
-```
-
-The script requires [Go](https://go.dev) to be installed. During installation it prompts for the dashboard/PAC port and defaults to `8888`, so the dashboard is typically available at `http://localhost:8888` unless you choose a different port.
-
-**Useful commands installed alongside the binary:**
-
-| Command | Description |
-|---|---|
-| `tailhopper-logs` | Tail the live log output |
-| `tailhopper-uninstall` | Fully remove Tailhopper |
-
-**Service management:**
+Install with Homebrew:
 
 ```bash
-# View service status
-launchctl list | grep tailhopper
-
-# Restart
-launchctl unload ~/Library/LaunchAgents/com.tailhopper.plist
-launchctl load ~/Library/LaunchAgents/com.tailhopper.plist
-
-# Stop
-launchctl unload ~/Library/LaunchAgents/com.tailhopper.plist
+brew install jcambass/homebrew-tap/tailhopper
+brew services start tailhopper
 ```
 
-**File locations (macOS):**
+Stop:
 
-| Path | Purpose |
-|---|---|
-| `~/.local/bin/tailhopper` | Binary |
-| `~/Library/Application Support/Tailhopper/` | State & configuration |
-| `~/Library/Logs/Tailhopper/tailhopper.log` | Log output |
-| `~/Library/LaunchAgents/com.tailhopper.plist` | LaunchAgent definition |
+```bash
+brew services stop tailhopper
+```
 
-### Manual / other platforms
+Uninstall:
+
+```bash
+brew uninstall tailhopper
+brew services cleanup
+```
+
+Use a custom dashboard port:
+
+```bash
+TAILHOPPER_HTTP_PORT=9999 brew services restart tailhopper
+```
+
+To also remove the state and log files:
+
+```bash
+rm -rf "$(brew --prefix)/var/tailhopper" "$(brew --prefix)/var/log/tailhopper.log"
+```
+
+### Linux
+
+Run the install script (single command):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
+```
+
+Install a specific version:
+
+```bash
+VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
+```
+
+Use a custom dashboard port:
+
+```bash
+HTTP_PORT=9999 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
+```
+
+View logs:
+
+```bash
+journalctl --user -fu tailhopper
+```
+
+Stop:
+
+```bash
+systemctl --user disable --now tailhopper
+```
+
+Uninstall:
+
+```bash
+systemctl --user disable --now tailhopper
+rm ~/.local/bin/tailhopper ~/.config/systemd/user/tailhopper.service
+systemctl --user daemon-reload
+```
+
+### Windows
+
+Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it. To run as a background service, use your preferred Go service wrapper or task scheduler.
+
+### Build from source
+
+Requires Go 1.22+.
 
 ```bash
 git clone https://github.com/jcambass/tailhopper.git
@@ -103,23 +141,7 @@ go build -o tailhopper ./cmd/tailhopper
 ./tailhopper
 ```
 
-Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
-
-## Build
-
-Requires Go 1.22+.
-
-```bash
-go build ./...
-```
-
-To produce the release binary:
-
-```bash
-go build -o tailhopper ./cmd/tailhopper
-```
-
-## Configuration
+## Configuration & State
 
 Tailhopper is configured via environment variables:
 
@@ -128,10 +150,56 @@ Tailhopper is configured via environment variables:
 | `HTTP_PORT` | `8888` | Dashboard and PAC file port |
 | `LOG_LEVEL` | `INFO` | Log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
+Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
+
 ## Logs
 
 Tailhopper outputs structured logs in [logfmt](https://brandur.org/logfmt) format to stderr. For colored output, pipe through [hl](https://github.com/pamburus/hl):
 
 ```bash
 ./tailhopper 2>&1 | hl
+```
+
+## Release process
+
+This section is for maintainers.
+
+Releases are automated via [GoReleaser](https://goreleaser.com). When you push a `v*` tag, GitHub Actions automatically:
+
+1. Builds cross-platform binaries (macOS, Linux, Windows)
+2. Creates a GitHub Release with artifacts
+3. Updates `Formula/tailhopper.rb` in `jcambass/homebrew-tap` (`url` and `sha256`) via `mislav/bump-homebrew-formula-action`
+
+### Publish a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow requires a `TAP_COMMITER_TOKEN` secret with write access to `jcambass/homebrew-tap`.
+
+### Validate release pipeline locally
+
+Run a full local snapshot release (no publish):
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest release --clean --snapshot --skip=publish
+```
+
+Validate config only:
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest check
+```
+
+### Test Homebrew formula locally
+
+Homebrew formula changes live in `jcambass/homebrew-tap`.
+Make sure to update the `url` and `sha256` in `Formula/tailhopper.rb` to point to the new release artifact before testing.
+
+```bash
+git clone https://github.com/jcambass/homebrew-tap.git
+cd homebrew-tap
+brew install --build-from-source --verbose --debug ./Formula/tailhopper.rb
 ```
