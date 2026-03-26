@@ -173,7 +173,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow requires a `TAP_COMMITER_TOKEN` secret with write access to `jcambass/homebrew-tap`.
+The workflow requires a `TAP_PR_WRITER` secret with the following permissions on `jcambass/homebrew-tap`:
+- Contents: Read and write (needed to create branches / push commits).
+- Pull requests: Read and write (needed to open/manage PRs)
 
 ### Validate release pipeline locally
 

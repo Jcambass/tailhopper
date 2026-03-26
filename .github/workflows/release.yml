@@ -66,4 +66,4 @@ jobs:
 
             Created by https://github.com/mislav/bump-homebrew-formula-action
         env:
-          COMMITTER_TOKEN: ${{ secrets.TAP_COMMITER_TOKEN }}
+          COMMITTER_TOKEN: ${{ secrets.TAP_PR_WRITER }}
