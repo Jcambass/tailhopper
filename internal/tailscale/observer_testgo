@@ -13,16 +13,29 @@ func TestAlreadyClaimedError(t *testing.T) {
 	}
 }
 
-type mockSuffixRegistry struct {
-	claims    map[string]int
-	failError error
+type mockObserver struct {
+	claims           map[string]int
+	failError        error
+	broadcastCalls   []int
+	userStateCalls   []mockUserStateCall
+	terminalErrCalls []mockTerminalErrCall
 }
 
-func newMockSuffixRegistry() *mockSuffixRegistry {
-	return &mockSuffixRegistry{claims: make(map[string]int)}
+type mockUserStateCall struct {
+	id    int
+	state UserState
 }
 
-func (m *mockSuffixRegistry) Claim(tailnetID int, suffix string) error {
+type mockTerminalErrCall struct {
+	id  int
+	err string
+}
+
+func newMockObserver() *mockObserver {
+	return &mockObserver{claims: make(map[string]int)}
+}
+
+func (m *mockObserver) Claim(tailnetID int, suffix string) error {
 	if m.failError != nil {
 		return m.failError
 	}
@@ -33,8 +46,20 @@ func (m *mockSuffixRegistry) Claim(tailnetID int, suffix string) error {
 	return nil
 }
 
-func TestMockSuffixRegistry_Claim(t *testing.T) {
-	reg := newMockSuffixRegistry()
+func (m *mockObserver) OnBroadcast(tailnetID int) {
+	m.broadcastCalls = append(m.broadcastCalls, tailnetID)
+}
+
+func (m *mockObserver) OnUserStateChange(tailnetID int, state UserState) {
+	m.userStateCalls = append(m.userStateCalls, mockUserStateCall{tailnetID, state})
+}
+
+func (m *mockObserver) OnTerminalErrorChange(tailnetID int, err string) {
+	m.terminalErrCalls = append(m.terminalErrCalls, mockTerminalErrCall{tailnetID, err})
+}
+
+func TestMockObserver_Claim(t *testing.T) {
+	reg := newMockObserver()
 
 	// First claim should succeed
 	if err := reg.Claim(1, "example.ts.net"); err != nil {
@@ -56,8 +81,8 @@ func TestMockSuffixRegistry_Claim(t *testing.T) {
 	}
 }
 
-func TestMockSuffixRegistry_ClaimError(t *testing.T) {
-	reg := newMockSuffixRegistry()
+func TestMockObserver_ClaimError(t *testing.T) {
+	reg := newMockObserver()
 	reg.failError = fmt.Errorf("disk full")
 
 	err := reg.Claim(1, "example.ts.net")

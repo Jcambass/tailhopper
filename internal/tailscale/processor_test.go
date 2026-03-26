@@ -110,12 +110,10 @@ func TestProcessor_AlwaysAndOneOf(t *testing.T) {
 }
 
 func TestProcessor_FluentBuilder(t *testing.T) {
-	tailnet := NewTailnet(1, "/tmp/test", "test-host", "", "", false, 1080, nil, nil, nil, nil, nil)
-
 	state := IPNState{}
 
 	// Just verify the fluent API doesn't panic
-	changed := tailnet.ProcessIPN(state).
+	changed := ProcessIPN(state).
 		Always(
 			func(IPNState) bool { return false },
 		).

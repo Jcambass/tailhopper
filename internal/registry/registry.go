@@ -123,17 +123,7 @@ func (m *Registry) Load() error {
 	m.nextID = 1
 
 	for _, c := range list {
-		broadcast := func() {
-			// Notify about the change for this tailnet
-			if m.broadcaster != nil {
-				m.broadcaster.BroadcastTailnetChange(c.ID)
-			}
-		}
-
-		onUserStateChange := m.userStateChangeCallback(c.ID)
-		onTerminalErrorChange := m.terminalErrorChangeCallback(c.ID)
-
-		tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
+		tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, tsnetpkg.NewRealTSNetServer)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
@@ -148,36 +138,41 @@ func (m *Registry) Load() error {
 	return nil
 }
 
-// userStateChangeCallback returns a callback that persists the user's desired state for the tailnet with the given ID.
-// The callback is safe to call while the tailnet's lock is held, since it only acquires the registry lock.
-func (m *Registry) userStateChangeCallback(id int) func(tailscale.UserState) {
-	return func(s tailscale.UserState) {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		tailnet, ok := m.tailnets[id]
-		if !ok {
-			return
-		}
-
-		tailnet.config.UserEnabled = s == tailscale.UserEnabled
-		_ = m.saveLocked()
+// OnBroadcast is called when a tailnet's state changes and listeners should be notified.
+func (m *Registry) OnBroadcast(tailnetID int) {
+	if m.broadcaster != nil {
+		m.broadcaster.BroadcastTailnetChange(tailnetID)
 	}
 }
 
-func (m *Registry) terminalErrorChangeCallback(id int) func(string) {
-	return func(errMsg string) {
-		m.mu.Lock()
-		defer m.mu.Unlock()
+// OnUserStateChange persists the user's desired state for the given tailnet.
+// Safe to call while the tailnet's lock is held, since it only acquires the registry lock.
+func (m *Registry) OnUserStateChange(tailnetID int, state tailscale.UserState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-		tailnet, ok := m.tailnets[id]
-		if !ok {
-			return
-		}
-
-		tailnet.config.TerminalError = errMsg
-		_ = m.saveLocked()
+	tailnet, ok := m.tailnets[tailnetID]
+	if !ok {
+		return
 	}
+
+	tailnet.config.UserEnabled = state == tailscale.UserEnabled
+	_ = m.saveLocked()
+}
+
+// OnTerminalErrorChange persists a terminal error for the given tailnet.
+// Safe to call while the tailnet's lock is held, since it only acquires the registry lock.
+func (m *Registry) OnTerminalErrorChange(tailnetID int, errMsg string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tailnet, ok := m.tailnets[tailnetID]
+	if !ok {
+		return
+	}
+
+	tailnet.config.TerminalError = errMsg
+	_ = m.saveLocked()
 }
 
 func (m *Registry) saveLocked() error {
@@ -287,18 +282,8 @@ func (m *Registry) Add(hostname string) (*tailscale.Tailnet, error) {
 		SocksPort: socksPort,
 	}
 
-	broadcast := func() {
-		// Notify about the change for this tailnet
-		if m.broadcaster != nil {
-			m.broadcaster.BroadcastTailnetChange(id)
-		}
-	}
-
-	onUserStateChange := m.userStateChangeCallback(id)
-	onTerminalErrorChange := m.terminalErrorChangeCallback(id)
-
 	// New tailnets start disabled; user_enabled will be persisted when the user starts it.
-	tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
+	tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, tsnetpkg.NewRealTSNetServer)
 
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,

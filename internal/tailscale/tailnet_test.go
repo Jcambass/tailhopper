@@ -6,17 +6,8 @@ import (
 	"tailscale.com/ipn"
 )
 
-// mockBroadcaster records broadcast calls for testing.
-type mockBroadcaster struct {
-	calls int
-}
-
-func (m *mockBroadcaster) broadcast() {
-	m.calls++
-}
-
 func TestNewTailnet_Defaults(t *testing.T) {
-	tn := NewTailnet(1, "/tmp/state", "my-host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp/state", "my-host", "", "", false, 1080, nil, nil)
 
 	if tn.ID() != 1 {
 		t.Errorf("ID() = %d, want 1", tn.ID())
@@ -44,7 +35,7 @@ func TestNewTailnet_Defaults(t *testing.T) {
 }
 
 func TestNewTailnet_UserEnabled(t *testing.T) {
-	tn := NewTailnet(2, "/tmp/state", "host", "", "", true, 1081, nil, nil, nil, nil, nil)
+	tn := NewTailnet(2, "/tmp/state", "host", "", "", true, 1081, nil, nil)
 
 	snap := tn.Snapshot()
 	if snap.UserState != UserEnabled {
@@ -56,7 +47,7 @@ func TestNewTailnet_UserEnabled(t *testing.T) {
 }
 
 func TestNewTailnet_WithTerminalError(t *testing.T) {
-	tn := NewTailnet(3, "/tmp/state", "host", "", "fatal error", true, 1082, nil, nil, nil, nil, nil)
+	tn := NewTailnet(3, "/tmp/state", "host", "", "fatal error", true, 1082, nil, nil)
 
 	snap := tn.Snapshot()
 	if snap.State != HasTerminalErrorState {
@@ -71,7 +62,7 @@ func TestNewTailnet_WithTerminalError(t *testing.T) {
 }
 
 func TestNewTailnet_WithClaimedSuffix(t *testing.T) {
-	tn := NewTailnet(4, "/tmp/state", "host", "my-tailnet.ts.net", "", false, 1083, nil, nil, nil, nil, nil)
+	tn := NewTailnet(4, "/tmp/state", "host", "my-tailnet.ts.net", "", false, 1083, nil, nil)
 
 	snap := tn.Snapshot()
 	if snap.MagicDNSSuffix != "my-tailnet.ts.net" {
@@ -104,7 +95,7 @@ func TestTailnet_SocksAddr(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, tt.port, nil, nil, nil, nil, nil)
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, tt.port, nil, nil)
 		if tn.SocksAddr() != tt.want {
 			t.Errorf("SocksAddr() with port %d = %q, want %q", tt.port, tn.SocksAddr(), tt.want)
 		}
@@ -112,7 +103,7 @@ func TestTailnet_SocksAddr(t *testing.T) {
 }
 
 func TestTailnet_MaybeTransitionToNeedsLoginLocked(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	t.Run("no state", func(t *testing.T) {
 		if tn.maybeTransitionToNeedsLoginLocked(IPNState{}) {
@@ -158,7 +149,7 @@ func TestTailnet_MaybeTransitionToNeedsLoginLocked(t *testing.T) {
 }
 
 func TestTailnet_MaybeTransitionToNeedsMachineAuthLocked(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	t.Run("no state", func(t *testing.T) {
 		if tn.maybeTransitionToNeedsMachineAuthLocked(IPNState{}) {
@@ -185,7 +176,7 @@ func TestTailnet_MaybeTransitionToNeedsMachineAuthLocked(t *testing.T) {
 }
 
 func TestTailnet_MaybeTransitionToConnectedLocked(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	t.Run("no state", func(t *testing.T) {
 		if tn.maybeTransitionToConnectedLocked(IPNState{}) {
@@ -212,7 +203,7 @@ func TestTailnet_MaybeTransitionToConnectedLocked(t *testing.T) {
 }
 
 func TestTailnet_UpdatePeersLocked(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	// Initially no peers
 	snap := tn.Snapshot()
@@ -227,24 +218,24 @@ func TestTailnet_UpdatePeersLocked(t *testing.T) {
 }
 
 func TestTailnet_MaybeClaimMagicDNSSuffixLocked(t *testing.T) {
-	registry := newMockSuffixRegistry()
+	obs := newMockObserver()
 
 	t.Run("no suffix in IPN state", func(t *testing.T) {
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, registry, nil, nil, nil, nil)
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
 		if tn.maybeClaimMagicDNSSuffixLocked(IPNState{}) {
 			t.Error("expected false with empty suffix")
 		}
 	})
 
 	t.Run("already claimed", func(t *testing.T) {
-		tn := NewTailnet(2, "/tmp", "host", "existing.ts.net", "", false, 1080, registry, nil, nil, nil, nil)
+		tn := NewTailnet(2, "/tmp", "host", "existing.ts.net", "", false, 1080, obs, nil)
 		if tn.maybeClaimMagicDNSSuffixLocked(IPNState{MagicDNSSuffix: "existing.ts.net"}) {
 			t.Error("expected false when already claimed with same suffix")
 		}
 	})
 
 	t.Run("successful claim", func(t *testing.T) {
-		tn := NewTailnet(3, "/tmp", "host", "", "", false, 1080, registry, nil, nil, nil, nil)
+		tn := NewTailnet(3, "/tmp", "host", "", "", false, 1080, obs, nil)
 		if !tn.maybeClaimMagicDNSSuffixLocked(IPNState{MagicDNSSuffix: "new-tailnet.ts.net"}) {
 			t.Error("expected true on successful claim")
 		}
@@ -254,7 +245,7 @@ func TestTailnet_MaybeClaimMagicDNSSuffixLocked(t *testing.T) {
 	})
 
 	t.Run("duplicate claim from different tailnet", func(t *testing.T) {
-		tn := NewTailnet(4, "/tmp", "host", "", "", false, 1080, registry, nil, nil, nil, nil)
+		tn := NewTailnet(4, "/tmp", "host", "", "", false, 1080, obs, nil)
 		// "new-tailnet.ts.net" is already claimed by tailnet 3
 		changed := tn.maybeClaimMagicDNSSuffixLocked(IPNState{MagicDNSSuffix: "new-tailnet.ts.net"})
 		if !changed {
@@ -266,7 +257,7 @@ func TestTailnet_MaybeClaimMagicDNSSuffixLocked(t *testing.T) {
 	})
 
 	t.Run("suffix mismatch with existing claim", func(t *testing.T) {
-		tn := NewTailnet(5, "/tmp", "host", "original.ts.net", "", false, 1080, registry, nil, nil, nil, nil)
+		tn := NewTailnet(5, "/tmp", "host", "original.ts.net", "", false, 1080, obs, nil)
 		// IPN reports a different suffix than what we claimed
 		if tn.maybeClaimMagicDNSSuffixLocked(IPNState{MagicDNSSuffix: "different.ts.net"}) {
 			t.Error("expected false when suffix mismatches (just logs error)")
@@ -275,14 +266,8 @@ func TestTailnet_MaybeClaimMagicDNSSuffixLocked(t *testing.T) {
 }
 
 func TestTailnet_SetTerminalErrorLocked(t *testing.T) {
-	var userStateCalls []UserState
-	var terminalErrorCalls []string
-
-	tn := NewTailnet(1, "/tmp", "host", "", "", true, 1080, nil, nil,
-		func(s UserState) { userStateCalls = append(userStateCalls, s) },
-		func(err string) { terminalErrorCalls = append(terminalErrorCalls, err) },
-		nil,
-	)
+	obs := newMockObserver()
+	tn := NewTailnet(1, "/tmp", "host", "", "", true, 1080, obs, nil)
 
 	changed := tn.setTerminalErrorLocked("fatal: something bad")
 
@@ -298,20 +283,17 @@ func TestTailnet_SetTerminalErrorLocked(t *testing.T) {
 	if tn.terminalError != "fatal: something bad" {
 		t.Errorf("terminal error = %q, want %q", tn.terminalError, "fatal: something bad")
 	}
-	if len(userStateCalls) != 1 || userStateCalls[0] != UserDisabled {
-		t.Errorf("expected user state callback with Disabled, got %v", userStateCalls)
+	if len(obs.userStateCalls) != 1 || obs.userStateCalls[0].state != UserDisabled {
+		t.Errorf("expected user state callback with Disabled, got %v", obs.userStateCalls)
 	}
-	if len(terminalErrorCalls) != 1 || terminalErrorCalls[0] != "fatal: something bad" {
-		t.Errorf("expected terminal error callback, got %v", terminalErrorCalls)
+	if len(obs.terminalErrCalls) != 1 || obs.terminalErrCalls[0].err != "fatal: something bad" {
+		t.Errorf("expected terminal error callback, got %v", obs.terminalErrCalls)
 	}
 }
 
 func TestTailnet_SetTerminalErrorLocked_Idempotent(t *testing.T) {
-	callCount := 0
-	tn := NewTailnet(1, "/tmp", "host", "", "already-errored", false, 1080, nil, nil, nil,
-		func(err string) { callCount++ },
-		nil,
-	)
+	obs := newMockObserver()
+	tn := NewTailnet(1, "/tmp", "host", "", "already-errored", false, 1080, obs, nil)
 	tn.currentState = HasTerminalErrorState
 
 	changed := tn.setTerminalErrorLocked("already-errored")
@@ -319,49 +301,47 @@ func TestTailnet_SetTerminalErrorLocked_Idempotent(t *testing.T) {
 	if changed {
 		t.Error("expected changed=false for same terminal error")
 	}
-	if callCount != 0 {
-		t.Errorf("expected no callback, got %d calls", callCount)
+	if len(obs.terminalErrCalls) != 0 {
+		t.Errorf("expected no callback, got %d calls", len(obs.terminalErrCalls))
 	}
 }
 
 func TestTailnet_NotifyCallbacks(t *testing.T) {
-	t.Run("broadcast callback is called", func(t *testing.T) {
-		b := &mockBroadcaster{}
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, b.broadcast, nil, nil, nil)
+	t.Run("observer broadcast is called", func(t *testing.T) {
+		obs := newMockObserver()
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
 		tn.notify()
-		if b.calls != 1 {
-			t.Errorf("expected 1 broadcast call, got %d", b.calls)
+		if len(obs.broadcastCalls) != 1 || obs.broadcastCalls[0] != 1 {
+			t.Errorf("expected broadcast call for tailnet 1, got %v", obs.broadcastCalls)
 		}
 	})
 
-	t.Run("nil broadcast doesn't panic", func(t *testing.T) {
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	t.Run("nil observer doesn't panic", func(t *testing.T) {
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 		tn.notify() // should not panic
 	})
 
 	t.Run("user state change callback", func(t *testing.T) {
-		var called UserState
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil,
-			func(s UserState) { called = s }, nil, nil)
+		obs := newMockObserver()
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
 		tn.notifyUserStateChange(UserEnabled)
-		if called != UserEnabled {
-			t.Errorf("expected UserEnabled, got %q", called)
+		if len(obs.userStateCalls) != 1 || obs.userStateCalls[0].state != UserEnabled {
+			t.Errorf("expected UserEnabled callback, got %v", obs.userStateCalls)
 		}
 	})
 
 	t.Run("terminal error change callback", func(t *testing.T) {
-		var called string
-		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil,
-			func(err string) { called = err }, nil)
+		obs := newMockObserver()
+		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
 		tn.notifyTerminalErrorChange("boom")
-		if called != "boom" {
-			t.Errorf("expected 'boom', got %q", called)
+		if len(obs.terminalErrCalls) != 1 || obs.terminalErrCalls[0].err != "boom" {
+			t.Errorf("expected 'boom' callback, got %v", obs.terminalErrCalls)
 		}
 	})
 }
 
 func TestTailnet_StartRequiresStoppedState(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	// Force state to something other than Stopped
 	tn.mu.Lock()
@@ -376,7 +356,7 @@ func TestTailnet_StartRequiresStoppedState(t *testing.T) {
 }
 
 func TestTailnet_StopRequiresValidState(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	// StoppedState should not be stoppable
 	ctx := t.Context()
@@ -387,7 +367,7 @@ func TestTailnet_StopRequiresValidState(t *testing.T) {
 }
 
 func TestTailnet_DialRequiresConnectedState(t *testing.T) {
-	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil, nil, nil, nil)
+	tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
 
 	ctx := t.Context()
 	_, err := tn.Dial(ctx, "tcp", "example.com:80")

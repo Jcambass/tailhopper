@@ -22,7 +22,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 	switch state {
 	case ConnectedState:
-		changed = t.ProcessIPN(ipnState).
+		changed = ProcessIPN(ipnState).
 			Always(
 				t.maybeClaimMagicDNSSuffixLocked,
 				t.updatePeersLocked,
@@ -35,7 +35,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 			Process()
 
 	case StartedState:
-		changed = t.ProcessIPN(ipnState).
+		changed = ProcessIPN(ipnState).
 			Always(
 				t.maybeUpdateSelfNodeHostnameLocked,
 			).
@@ -47,7 +47,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 			Process()
 
 	case NeedsLoginState:
-		changed = t.ProcessIPN(ipnState).
+		changed = ProcessIPN(ipnState).
 			Always(
 				t.maybeUpdateSelfNodeHostnameLocked,
 			).
@@ -58,7 +58,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 			Process()
 
 	case NeedsMachineAuthState:
-		changed = t.ProcessIPN(ipnState).
+		changed = ProcessIPN(ipnState).
 			Always(
 				t.maybeClaimMagicDNSSuffixLocked,
 				t.maybeUpdateSelfNodeHostnameLocked,
@@ -100,7 +100,7 @@ func (t *Tailnet) maybeClaimMagicDNSSuffixLocked(ipnState IPNState) bool {
 		return false
 	}
 
-	if err := t.magicDNSSuffixRegistry.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
+	if err := t.observer.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
 		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
 			t.log().Error("magic DNS suffix claim error", slog.Any("error", claimErr))
 			// A duplicate claim is fatal: disable the tailnet and keep it in an

@@ -15,17 +15,12 @@ import (
 
 type Tailnet struct {
 	// Immutable after construction.
-	id                     int
-	socksPort              int
-	tsnetStateDir          string
-	userSetHostname        string
-	magicDNSSuffixRegistry MagicDNSSuffixRegistry
-	broadcast              func()
-	newServer              tsnetpkg.TSNetServerFactory
-	// onUserStateChange, if non-nil, is called whenever the user's desired state changes.
-	onUserStateChange func(UserState)
-	// onTerminalErrorChange, if non-nil, is called whenever a fatal terminal error is set.
-	onTerminalErrorChange func(string)
+	id              int
+	socksPort       int
+	tsnetStateDir   string
+	userSetHostname string
+	observer        TailnetObserver
+	newServer       tsnetpkg.TSNetServerFactory
 
 	// Logger has its own lock to avoid blocking state reads.
 	logMu  sync.RWMutex
@@ -68,20 +63,17 @@ func (s *TailnetSnapshot) String() string {
 	return fmt.Sprintf("TailnetSnapshot{ID: %d, State: %s, UserState: %s, MagicDNSSuffix: %s, Hostname: %s, LoginURL: %s, Peers: %d, TerminalError: %s}", s.ID, s.State, s.UserState, s.MagicDNSSuffix, s.Hostname, s.LoginURL, len(s.Peers), s.TerminalError)
 }
 
-func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func(), onUserStateChange func(UserState), onTerminalErrorChange func(string), newServer tsnetpkg.TSNetServerFactory) *Tailnet {
+func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, observer TailnetObserver, newServer tsnetpkg.TSNetServerFactory) *Tailnet {
 	t := &Tailnet{
-		id:                     id,
-		magicDNSSuffixRegistry: magicDNSSuffixRegistry,
-		broadcast:              broadcast,
-		newServer:              newServer,
-		onUserStateChange:      onUserStateChange,
-		onTerminalErrorChange:  onTerminalErrorChange,
-		logger:                 slog.Default().With("component", "tailnet", "tailnet_id", id),
-		tsnetStateDir:          tsnetStateDir,
-		userSetHostname:        hostname,
-		socksPort:              socksPort,
-		claimedMagicDNSSuffix:  claimedMagicDNSSuffix,
-		terminalError:          terminalError,
+		id:                    id,
+		observer:              observer,
+		newServer:             newServer,
+		logger:                slog.Default().With("component", "tailnet", "tailnet_id", id),
+		tsnetStateDir:         tsnetStateDir,
+		userSetHostname:       hostname,
+		socksPort:             socksPort,
+		claimedMagicDNSSuffix: claimedMagicDNSSuffix,
+		terminalError:         terminalError,
 	}
 
 	if claimedMagicDNSSuffix != "" {
@@ -382,26 +374,26 @@ func (t *Tailnet) setState(state State) {
 
 // notify broadcasts changes that do not require a state transition.
 func (t *Tailnet) notify() {
-	if t.broadcast != nil {
-		t.broadcast()
+	if t.observer != nil {
+		t.observer.OnBroadcast(t.id)
 	}
 }
 
-// notifyUserStateChange calls the onUserStateChange callback if set.
-// Callers (Start, Stop, Logout) hold t.mu when invoking this; the callback
+// notifyUserStateChange calls the observer if set.
+// Callers (Start, Stop, Logout) hold t.mu when invoking this; the observer
 // only acquires the registry lock, so there is no deadlock risk.
 func (t *Tailnet) notifyUserStateChange(s UserState) {
-	if t.onUserStateChange != nil {
-		t.onUserStateChange(s)
+	if t.observer != nil {
+		t.observer.OnUserStateChange(t.id, s)
 	}
 }
 
-// notifyTerminalErrorChange calls the onTerminalErrorChange callback if set.
-// Callers hold t.mu when invoking this; the callback only acquires the registry
+// notifyTerminalErrorChange calls the observer if set.
+// Callers hold t.mu when invoking this; the observer only acquires the registry
 // lock, so there is no deadlock risk.
 func (t *Tailnet) notifyTerminalErrorChange(err string) {
-	if t.onTerminalErrorChange != nil {
-		t.onTerminalErrorChange(err)
+	if t.observer != nil {
+		t.observer.OnTerminalErrorChange(t.id, err)
 	}
 }
 

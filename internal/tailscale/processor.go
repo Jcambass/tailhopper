@@ -8,7 +8,7 @@ type ipnProcessor struct {
 }
 
 // ProcessIPN returns a new IPN processor for the given state.
-func (t *Tailnet) ProcessIPN(ipnState IPNState) *ipnProcessor {
+func ProcessIPN(ipnState IPNState) *ipnProcessor {
 	return &ipnProcessor{
 		ipnState: ipnState,
 	}
