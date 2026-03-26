@@ -57,8 +57,7 @@ From there you can:
 Install with Homebrew:
 
 ```bash
-brew tap jcambass/tailhopper
-brew install tailhopper
+brew install jcambass/homebrew-tap/tailhopper
 brew services start tailhopper
 ```
 
@@ -169,7 +168,7 @@ Releases are automated via [GoReleaser](https://goreleaser.com). When you push a
 
 1. Builds cross-platform binaries (macOS, Linux, Windows)
 2. Creates a GitHub Release with artifacts
-3. Updates `Formula/tailhopper.rb` (`url` and `sha256`) via `mislav/bump-homebrew-formula-action`
+3. Updates `Formula/tailhopper.rb` in `jcambass/homebrew-tap` (`url` and `sha256`) via `mislav/bump-homebrew-formula-action`
 
 ### Publish a release
 
@@ -178,7 +177,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow uses the repository `GITHUB_TOKEN`; no extra secret is required to update this repo's Homebrew formula.
+The workflow requires a `TAP_COMMITER_TOKEN` secret with write access to `jcambass/homebrew-tap`.
 
 ### Validate release pipeline locally
 
@@ -196,9 +195,11 @@ go run github.com/goreleaser/goreleaser/v2@latest check
 
 ### Test Homebrew formula locally
 
-Before testing the Homebrew formula, make sure to update `Formula/tailhopper.rb` with the latest release `url` and `sha256`.
-We do not use goreleaser for this since it only supports Homebrew casks but we want a formula for better macOS launchd integration.
+Homebrew formula changes live in `jcambass/homebrew-tap`.
+Make sure to update the `url` and `sha256` in `Formula/tailhopper.rb` to point to the new release artifact before testing.
 
 ```bash
-HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source --verbose --debug tailhopper
+git clone https://github.com/jcambass/homebrew-tap.git
+cd homebrew-tap
+brew install --build-from-source --verbose --debug ./Formula/tailhopper.rb
 ```
