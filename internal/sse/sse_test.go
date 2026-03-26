@@ -238,3 +238,79 @@ func TestWriteSSEEvent(t *testing.T) {
 		t.Errorf("got %q, want %q", body, expected)
 	}
 }
+
+func TestSSEBroadcaster_ServeSSE_InitialGlobalRefresh(t *testing.T) {
+	b := NewSSEBroadcaster()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest(http.MethodGet, "/events", nil)
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		b.ServeSSE(w, r)
+		close(done)
+	}()
+
+	// Cancel immediately — should still have the initial global event
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := w.Body.String()
+	if !strings.Contains(body, "event: global\ndata: update\n\n") {
+		t.Errorf("expected initial global refresh event, got %q", body)
+	}
+}
+
+func TestSSEBroadcaster_BufferFull_DropsEvent(t *testing.T) {
+	b := NewSSEBroadcaster()
+	ctx := context.Background()
+	id, ch := b.Subscribe(ctx)
+	defer b.Unsubscribe(id)
+
+	// Fill the buffer (subscriberBufferSize = 10)
+	for range subscriberBufferSize {
+		b.Broadcast("fill")
+	}
+
+	// This broadcast should be dropped (buffer full) without blocking
+	done := make(chan struct{})
+	go func() {
+		b.Broadcast("overflow")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - didn't block
+	case <-time.After(time.Second):
+		t.Fatal("Broadcast blocked when buffer was full")
+	}
+
+	// Drain the channel
+	received := 0
+	for {
+		select {
+		case <-ch:
+			received++
+		default:
+			goto done_drain
+		}
+	}
+done_drain:
+
+	if received != subscriberBufferSize {
+		t.Errorf("received %d events, want %d (overflow should be dropped)", received, subscriberBufferSize)
+	}
+}
+
+func TestSSEBroadcaster_DoubleUnsubscribe(t *testing.T) {
+	b := NewSSEBroadcaster()
+	ctx := context.Background()
+	id, _ := b.Subscribe(ctx)
+	b.Unsubscribe(id)
+	// Second unsubscribe should not panic
+	b.Unsubscribe(id)
+}

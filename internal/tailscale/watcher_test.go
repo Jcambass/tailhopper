@@ -1,8 +1,13 @@
 package tailscale
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
+	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
 )
@@ -187,5 +192,237 @@ func TestParseLogKeyValues(t *testing.T) {
 				t.Errorf("got clean %q, want %q", clean, tt.wantClean)
 			}
 		})
+	}
+}
+
+func TestNewWatcher_NilClient(t *testing.T) {
+	_, err := NewWatcher(nil, func(context.Context, IPNState) {}, 1)
+	if err == nil {
+		t.Fatal("expected error with nil local client")
+	}
+}
+
+func TestWatcher_DeliversNotifications(t *testing.T) {
+	notifications := make(chan ipn.Notify, 3)
+	running := ipn.Running
+	notifications <- ipn.Notify{State: &running}
+
+	var mu sync.Mutex
+	var receivedStates []IPNState
+
+	client := &tsnetpkg.MockLocalClient{
+		WatchIPNBusFunc: func(ctx context.Context, mask ipn.NotifyWatchOpt) (tsnetpkg.IPNBusWatcher, error) {
+			return &tsnetpkg.MockIPNBusWatcher{
+				NextFunc: func() (ipn.Notify, error) {
+					select {
+					case n := <-notifications:
+						return n, nil
+					case <-ctx.Done():
+						return ipn.Notify{}, ctx.Err()
+					}
+				},
+			}, nil
+		},
+	}
+
+	w, err := NewWatcher(client, func(ctx context.Context, state IPNState) {
+		mu.Lock()
+		receivedStates = append(receivedStates, state)
+		mu.Unlock()
+	}, 1)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	// Wait for the notification to be processed
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		count := len(receivedStates)
+		mu.Unlock()
+		if count >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for notification")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	w.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(receivedStates) < 1 {
+		t.Fatal("expected at least 1 state callback")
+	}
+	if receivedStates[0].State == nil || *receivedStates[0].State != ipn.Running {
+		t.Errorf("expected Running state, got %v", receivedStates[0].State)
+	}
+}
+
+func TestWatcher_Close_StopsGoroutine(t *testing.T) {
+	client := &tsnetpkg.MockLocalClient{
+		WatchIPNBusFunc: func(ctx context.Context, mask ipn.NotifyWatchOpt) (tsnetpkg.IPNBusWatcher, error) {
+			return &tsnetpkg.MockIPNBusWatcher{
+				NextFunc: func() (ipn.Notify, error) {
+					<-ctx.Done()
+					return ipn.Notify{}, ctx.Err()
+				},
+			}, nil
+		},
+	}
+
+	w, err := NewWatcher(client, func(context.Context, IPNState) {}, 1)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	// Close should not hang
+	done := make(chan struct{})
+	go func() {
+		w.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close() hung")
+	}
+}
+
+func TestWatcher_WatchIPNBusError_Exits(t *testing.T) {
+	client := &tsnetpkg.MockLocalClient{
+		WatchIPNBusFunc: func(ctx context.Context, mask ipn.NotifyWatchOpt) (tsnetpkg.IPNBusWatcher, error) {
+			return nil, fmt.Errorf("bus unavailable")
+		},
+	}
+
+	w, err := NewWatcher(client, func(context.Context, IPNState) {}, 1)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	// Goroutine should exit quickly after error
+	done := make(chan struct{})
+	go func() {
+		w.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close() hung after WatchIPNBus error")
+	}
+}
+
+func TestWatcher_NextError_Exits(t *testing.T) {
+	callCount := 0
+	client := &tsnetpkg.MockLocalClient{
+		WatchIPNBusFunc: func(ctx context.Context, mask ipn.NotifyWatchOpt) (tsnetpkg.IPNBusWatcher, error) {
+			return &tsnetpkg.MockIPNBusWatcher{
+				NextFunc: func() (ipn.Notify, error) {
+					callCount++
+					if callCount == 1 {
+						return ipn.Notify{}, fmt.Errorf("stream broken")
+					}
+					// Should never get here since the goroutine exits on error
+					<-ctx.Done()
+					return ipn.Notify{}, ctx.Err()
+				},
+			}, nil
+		},
+	}
+
+	w, err := NewWatcher(client, func(context.Context, IPNState) {}, 1)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	// Goroutine should exit quickly after Next() error
+	done := make(chan struct{})
+	go func() {
+		w.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close() hung after Next() error")
+	}
+}
+
+func TestWatcher_AccumulatesState(t *testing.T) {
+	notifications := make(chan ipn.Notify, 10)
+
+	// Send two notifications: first sets state, second sets err message
+	running := ipn.Running
+	notifications <- ipn.Notify{State: &running}
+	errMsg := "warning"
+	notifications <- ipn.Notify{ErrMessage: &errMsg}
+
+	var mu sync.Mutex
+	var receivedStates []IPNState
+
+	client := &tsnetpkg.MockLocalClient{
+		WatchIPNBusFunc: func(ctx context.Context, mask ipn.NotifyWatchOpt) (tsnetpkg.IPNBusWatcher, error) {
+			return &tsnetpkg.MockIPNBusWatcher{
+				NextFunc: func() (ipn.Notify, error) {
+					select {
+					case n := <-notifications:
+						return n, nil
+					case <-ctx.Done():
+						return ipn.Notify{}, ctx.Err()
+					}
+				},
+			}, nil
+		},
+	}
+
+	w, err := NewWatcher(client, func(ctx context.Context, state IPNState) {
+		mu.Lock()
+		receivedStates = append(receivedStates, state)
+		mu.Unlock()
+	}, 1)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		count := len(receivedStates)
+		mu.Unlock()
+		if count >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for 2 notifications")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	w.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Second callback should have accumulated state from both notifications
+	last := receivedStates[1]
+	if last.State == nil || *last.State != ipn.Running {
+		t.Errorf("expected Running state preserved, got %v", last.State)
+	}
+	if last.ErrMessage == nil || *last.ErrMessage != "warning" {
+		t.Errorf("expected ErrMessage 'warning', got %v", last.ErrMessage)
 	}
 }

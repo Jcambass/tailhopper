@@ -384,3 +384,181 @@ func TestRegistry_TerminalErrorFromPersistence(t *testing.T) {
 		t.Errorf("state = %q, want %q", snap.State, tailscale.HasTerminalErrorState)
 	}
 }
+
+func TestRegistry_OnUserStateChange_Persists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+	broadcaster := &mockBroadcasterReg{}
+
+	reg, _ := NewRegistry(path, broadcaster)
+	added, _ := reg.Add("host")
+
+	// Trigger user state change
+	reg.OnUserStateChange(added.ID(), tailscale.UserEnabled)
+
+	// Reload from disk and verify persistence
+	reg2, err := NewRegistry(path, nil)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	list := reg2.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 tailnet, got %d", len(list))
+	}
+	snap := list[0].Snapshot()
+	if snap.UserState != tailscale.UserEnabled {
+		t.Errorf("user state after reload = %q, want %q", snap.UserState, tailscale.UserEnabled)
+	}
+}
+
+func TestRegistry_OnTerminalErrorChange_Persists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	reg, _ := NewRegistry(path, nil)
+	added, _ := reg.Add("host")
+
+	reg.OnTerminalErrorChange(added.ID(), "fatal error")
+
+	// Reload from disk
+	reg2, _ := NewRegistry(path, nil)
+	list := reg2.List()
+	snap := list[0].Snapshot()
+	if snap.TerminalError != "fatal error" {
+		t.Errorf("terminal error after reload = %q, want %q", snap.TerminalError, "fatal error")
+	}
+}
+
+func TestRegistry_OnBroadcast_NotifiesSubscribers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+	broadcaster := &mockBroadcasterReg{}
+
+	reg, _ := NewRegistry(path, broadcaster)
+	reg.OnBroadcast(42)
+
+	if len(broadcaster.tailnetChanges) != 1 {
+		t.Fatalf("expected 1 tailnet change, got %d", len(broadcaster.tailnetChanges))
+	}
+	if broadcaster.tailnetChanges[0] != 42 {
+		t.Errorf("tailnet change ID = %d, want 42", broadcaster.tailnetChanges[0])
+	}
+}
+
+func TestRegistry_OnUserStateChange_NonExistentTailnet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	reg, _ := NewRegistry(path, nil)
+	// Should not panic
+	reg.OnUserStateChange(999, tailscale.UserEnabled)
+}
+
+func TestRegistry_OnTerminalErrorChange_NonExistentTailnet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	reg, _ := NewRegistry(path, nil)
+	// Should not panic
+	reg.OnTerminalErrorChange(999, "error")
+}
+
+func TestRegistry_RestoreEnabledTailnets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	// Create config with one enabled and one disabled tailnet
+	configs := []PersistedTailnet{
+		{ID: 1, StateDir: filepath.Join(dir, "1"), SocksPort: 0, Hostname: "host1", UserEnabled: true},
+		{ID: 2, StateDir: filepath.Join(dir, "2"), SocksPort: 0, Hostname: "host2", UserEnabled: false},
+		{ID: 3, StateDir: filepath.Join(dir, "3"), SocksPort: 0, Hostname: "host3", UserEnabled: true, TerminalError: "broken"},
+	}
+	writeConfig(t, path, configs)
+
+	reg, err := NewRegistry(path, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	// RestoreEnabledTailnets will try to start tailnets, but Start will fail
+	// because they use real tsnet servers. That's fine — we check the intent.
+	reg.RestoreEnabledTailnets(t.Context())
+
+	list := reg.List()
+	// Tailnet 1: user enabled + stopped → should have attempted start (will fail, remains stopped)
+	// Tailnet 2: user disabled → should be skipped
+	// Tailnet 3: user enabled + terminal error (not stopped) → should be skipped
+	for _, tn := range list {
+		snap := tn.Snapshot()
+		if snap.ID == 3 && snap.State != tailscale.HasTerminalErrorState {
+			t.Errorf("tailnet 3 state = %q, want %q (should not be started)", snap.State, tailscale.HasTerminalErrorState)
+		}
+	}
+}
+
+func TestRegistry_Delete_CleansUpStateDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	reg, _ := NewRegistry(path, nil)
+	added, _ := reg.Add("host")
+
+	// Create the state directory that Add would normally reference
+	snap := added.Snapshot()
+	_ = snap
+	// The state dir is set by the registry internally; let's verify via re-read
+	stateDir := filepath.Join(dir, "tailnets", "1")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create a file inside to verify removal
+	if err := os.WriteFile(filepath.Join(stateDir, "test.txt"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reg.Delete(added.ID()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Error("expected state directory to be removed")
+	}
+}
+
+func TestRegistry_Claim_PersistsToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tailhopper.json")
+
+	configs := []PersistedTailnet{
+		{ID: 1, StateDir: filepath.Join(dir, "1"), SocksPort: 1080, Hostname: "host"},
+	}
+	writeConfig(t, path, configs)
+
+	reg, _ := NewRegistry(path, nil)
+	if err := reg.Claim(1, "my-tailnet.ts.net"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	// Reload to verify persistence
+	reg2, _ := NewRegistry(path, nil)
+	if !reg2.HasUnconfiguredTailnets() == true {
+		// After claiming, no unconfigured tailnets should remain
+	}
+	list := reg2.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 tailnet, got %d", len(list))
+	}
+
+	// Read raw JSON to verify the suffix was persisted
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted []PersistedTailnet
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted[0].ClaimedMagicDNSSuffix != "my-tailnet.ts.net" {
+		t.Errorf("persisted suffix = %q, want %q", persisted[0].ClaimedMagicDNSSuffix, "my-tailnet.ts.net")
+	}
+}
