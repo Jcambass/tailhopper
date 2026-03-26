@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/socks"
+	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
-	"tailscale.com/tsnet"
 )
 
 type Tailnet struct {
@@ -23,6 +23,7 @@ type Tailnet struct {
 	userSetHostname        string
 	magicDNSSuffixRegistry MagicDNSSuffixRegistry
 	broadcast              func()
+	newServer              tsnetpkg.TSNetServerFactory
 	// onUserStateChange, if non-nil, is called whenever the user's desired state changes.
 	onUserStateChange func(UserState)
 	// onTerminalErrorChange, if non-nil, is called whenever a fatal terminal error is set.
@@ -35,7 +36,7 @@ type Tailnet struct {
 	mu sync.RWMutex
 
 	// Only changed by commands (start, stop, logout).
-	server     *tsnet.Server
+	server     tsnetpkg.TSNetServer
 	watcher    *watcher
 	socksProxy *socks.Server
 
@@ -69,11 +70,12 @@ func (s *TailnetSnapshot) String() string {
 	return fmt.Sprintf("TailnetSnapshot{ID: %d, State: %s, UserState: %s, MagicDNSSuffix: %s, Hostname: %s, LoginURL: %s, Peers: %d, TerminalError: %s}", s.ID, s.State, s.UserState, s.MagicDNSSuffix, s.Hostname, s.LoginURL, len(s.Peers), s.TerminalError)
 }
 
-func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func(), onUserStateChange func(UserState), onTerminalErrorChange func(string)) *Tailnet {
+func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, magicDNSSuffixRegistry MagicDNSSuffixRegistry, broadcast func(), onUserStateChange func(UserState), onTerminalErrorChange func(string), newServer tsnetpkg.TSNetServerFactory) *Tailnet {
 	t := &Tailnet{
 		id:                     id,
 		magicDNSSuffixRegistry: magicDNSSuffixRegistry,
 		broadcast:              broadcast,
+		newServer:              newServer,
 		onUserStateChange:      onUserStateChange,
 		onTerminalErrorChange:  onTerminalErrorChange,
 		logger:                 slog.Default().With("component", "tailnet", "tailnet_id", id),
@@ -161,12 +163,12 @@ func (t *Tailnet) Start(ctx context.Context) error {
 	// Asynchronously start the server
 	t.log().Debug("Starting tsnet server")
 
-	server := &tsnet.Server{
+	server := t.newServer(tsnetpkg.TSNetServerConfig{
 		Dir:      t.tsnetStateDir,
 		Hostname: t.userSetHostname,
-		UserLogf: t.tsnetLogf(slog.LevelInfo),
 		Logf:     t.tsnetLogf(slog.LevelDebug),
-	}
+		UserLogf: t.tsnetLogf(slog.LevelInfo),
+	})
 
 	err = server.Start()
 	if err != nil {
@@ -316,12 +318,12 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 
 	// Create server if needed before releasing the lock.
 	if t.server == nil {
-		t.server = &tsnet.Server{
+		t.server = t.newServer(tsnetpkg.TSNetServerConfig{
 			Dir:      t.tsnetStateDir,
 			Hostname: t.userSetHostname,
-			UserLogf: t.tsnetLogf(slog.LevelInfo),
 			Logf:     t.tsnetLogf(slog.LevelDebug),
-		}
+			UserLogf: t.tsnetLogf(slog.LevelInfo),
+		})
 	}
 	server := t.server
 
@@ -597,7 +599,7 @@ func (t *Tailnet) setTerminalErrorLocked(errMsg string) bool {
 }
 
 type terminalCleanup struct {
-	server     *tsnet.Server
+	server     tsnetpkg.TSNetServer
 	watcher    *watcher
 	socksProxy *socks.Server
 }

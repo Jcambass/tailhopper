@@ -42,5 +42,13 @@ type IPNBusWatcher interface {
 	Close() error
 }
 
+// TSNetServerConfig holds configuration for creating a new TSNetServer.
+type TSNetServerConfig struct {
+	Dir      string
+	Hostname string
+	Logf     func(string, ...any)
+	UserLogf func(string, ...any)
+}
+
 // TSNetServerFactory is a function that creates new TSNetServer instances.
-type TSNetServerFactory func(serviceName string) TSNetServer
+type TSNetServerFactory func(config TSNetServerConfig) TSNetServer

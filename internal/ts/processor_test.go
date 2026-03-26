@@ -110,7 +110,7 @@ func TestProcessor_AlwaysAndOneOf(t *testing.T) {
 }
 
 func TestProcessor_FluentBuilder(t *testing.T) {
-	tailnet := NewTailnet(1, "/tmp/test", "test-host", "", "", false, 1080, nil, nil, nil, nil)
+	tailnet := NewTailnet(1, "/tmp/test", "test-host", "", "", false, 1080, nil, nil, nil, nil, nil)
 
 	state := IPNState{}
 

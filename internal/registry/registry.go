@@ -13,6 +13,7 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ts"
+	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
 	"tailscale.com/util/dnsname"
 )
 
@@ -132,7 +133,7 @@ func (m *Registry) Load() error {
 		onUserStateChange := m.userStateChangeCallback(c.ID)
 		onTerminalErrorChange := m.terminalErrorChangeCallback(c.ID)
 
-		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange)
+		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
@@ -297,7 +298,7 @@ func (m *Registry) Add(hostname string) (*ts.Tailnet, error) {
 	onTerminalErrorChange := m.terminalErrorChangeCallback(id)
 
 	// New tailnets start disabled; user_enabled will be persisted when the user starts it.
-	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange)
+	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
 
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,

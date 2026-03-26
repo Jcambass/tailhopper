@@ -2,9 +2,7 @@ package tsnet
 
 import (
 	"context"
-	"log/slog"
 	"net"
-	"time"
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
@@ -15,54 +13,34 @@ var _ TSNetServer = (*RealTSNetServer)(nil)
 
 // RealTSNetServer wraps a real tsnet.Server to implement TSNetServer.
 type RealTSNetServer struct {
-	tsnet.Server
+	server tsnet.Server
 }
 
-// NewRealTSNetServer creates a new RealTSNetServer instance.
-func NewRealTSNetServer(serviceName string) *RealTSNetServer {
-	server := &RealTSNetServer{}
-	adapter := tsnetLogAdapter(serviceName)
-	server.Logf = adapter     // Backend/debugging logs
-	server.UserLogf = adapter // User-facing logs (AuthURL, etc.)
-	return server
+// NewRealTSNetServer creates a new RealTSNetServer with the given config.
+func NewRealTSNetServer(config TSNetServerConfig) TSNetServer {
+	return &RealTSNetServer{
+		server: tsnet.Server{
+			Dir:      config.Dir,
+			Hostname: config.Hostname,
+			Logf:     config.Logf,
+			UserLogf: config.UserLogf,
+		},
+	}
 }
 
 // Start implements TSNetServer.
 func (s *RealTSNetServer) Start() error {
-	start := time.Now()
-	slog.Debug("tsnet server Start() called",
-		"hostname", s.Hostname,
-		"ephemeral", s.Ephemeral,
-		"dir", s.Dir,
-		"has_auth_key", s.AuthKey != "",
-	)
-
-	err := s.Server.Start()
-
-	if err != nil {
-		slog.Debug("tsnet server Start() failed",
-			"hostname", s.Hostname,
-			"duration", time.Since(start),
-			"error", err,
-		)
-	} else {
-		slog.Debug("tsnet server Start() succeeded",
-			"hostname", s.Hostname,
-			"duration", time.Since(start),
-		)
-	}
-
-	return err
+	return s.server.Start()
 }
 
 // Close implements TSNetServer.
 func (s *RealTSNetServer) Close() error {
-	return s.Server.Close()
+	return s.server.Close()
 }
 
 // LocalClient implements TSNetServer.
 func (s *RealTSNetServer) LocalClient() (LocalClient, error) {
-	lc, err := s.Server.LocalClient()
+	lc, err := s.server.LocalClient()
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +49,7 @@ func (s *RealTSNetServer) LocalClient() (LocalClient, error) {
 
 // Dial implements TSNetServer.
 func (s *RealTSNetServer) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	return s.Server.Dial(ctx, network, addr)
+	return s.server.Dial(ctx, network, addr)
 }
 
 // RealLocalClient wraps a real local.Client.

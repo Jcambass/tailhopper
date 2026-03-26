@@ -9,7 +9,7 @@ import (
 )
 
 func mockTailnet(id int, suffix string, socksPort int) *ts.Tailnet {
-	return ts.NewTailnet(id, "/tmp/test", "host", suffix, "", false, socksPort, nil, nil, nil, nil)
+	return ts.NewTailnet(id, "/tmp/test", "host", suffix, "", false, socksPort, nil, nil, nil, nil, nil)
 }
 
 func TestBuildPACForTailnets_Empty(t *testing.T) {

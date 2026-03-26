@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
-	"tailscale.com/client/local"
+	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
 )
@@ -20,13 +20,13 @@ type watcher struct {
 	wg          *sync.WaitGroup
 	cancel      context.CancelFunc
 	logger      *slog.Logger
-	localClient *local.Client
+	localClient tsnetpkg.LocalClient
 	onState     func(context.Context, IPNState)
 }
 
 // NewWatcher creates and starts a new IPN bus watcher.
 // The caller must call Close() to clean up resources.
-func NewWatcher(localClient *local.Client, onState func(context.Context, IPNState), tailnetID int) (*watcher, error) {
+func NewWatcher(localClient tsnetpkg.LocalClient, onState func(context.Context, IPNState), tailnetID int) (*watcher, error) {
 	w := &watcher{
 		wg:          &sync.WaitGroup{},
 		logger:      slog.Default().With(slog.String("component", "watcher"), slog.Int("tailnet_id", tailnetID)),
