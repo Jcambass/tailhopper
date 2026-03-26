@@ -101,6 +101,12 @@ Install a specific version:
 VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
 ```
 
+Use a custom dashboard port:
+
+```bash
+HTTP_PORT=9999 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
+```
+
 View logs:
 
 ```bash
