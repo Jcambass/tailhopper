@@ -13,10 +13,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARCHIVE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BIN_SRC="${ARCHIVE_ROOT}/tailhopper"
-SERVICE_SRC="${ARCHIVE_ROOT}/tailhopper.service"
+SERVICE_SRC="${ARCHIVE_ROOT}/linux/tailhopper.service"
 
 if [[ ! -f "${BIN_SRC}" || ! -f "${SERVICE_SRC}" ]]; then
-  echo "Expected tailhopper and tailhopper.service next to this script." >&2
+  echo "Expected tailhopper and linux/tailhopper.service in extracted archive." >&2
   echo "Run this script from extracted release contents." >&2
   exit 1
 fi

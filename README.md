@@ -62,10 +62,15 @@ brew install tailhopper
 brew services start tailhopper
 ```
 
-Stop or uninstall:
+Stop:
 
 ```bash
 brew services stop tailhopper
+```
+
+Uninstall:
+
+```bash
 brew uninstall tailhopper
 brew services cleanup
 ```

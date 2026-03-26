@@ -48,7 +48,7 @@ archives:
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - tailhopper.service
+      - linux/tailhopper.service
       - linux/install-tar.sh
 
   - id: darwin-archive
