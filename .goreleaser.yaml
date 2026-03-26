@@ -1,0 +1,54 @@
+version: 2
+
+project_name: tailhopper
+
+builds:
+  - main: ./cmd/tailhopper
+    binary: tailhopper
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - tailhopper.service
+
+checksum:
+  name_template: "sha256sum.txt"
+
+release:
+  github:
+    owner: jcambass
+    name: tailhopper
+
+homebrew_casks:
+  - name: tailhopper
+    repository:
+      owner: jcambass
+      name: tailhopper
+      branch: main
+    directory: Casks
+    homepage: https://github.com/jcambass/tailhopper
+    description: Use multiple Tailscale tailnets at the same time
+    license: MIT
+    skip_upload: false
+    binaries:
+      - tailhopper
+    service: |
+      run [opt_bin/"tailhopper"]
+      keep_alive true
+      working_dir "#{var}/tailhopper"
+      environment_variables HTTP_PORT: "8888"
+      log_path "#{var}/log/tailhopper.log"
+      error_log_path "#{var}/log/tailhopper.log"

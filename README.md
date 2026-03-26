@@ -52,47 +52,61 @@ From there you can:
 
 ## Installation
 
-### macOS (recommended)
+### macOS
 
-The install script builds the binary, registers it as a LaunchAgent (starts at login, restarts on crash), and creates helper commands:
-
-```bash
-git clone https://github.com/jcambass/tailhopper.git
-cd tailhopper
-./macos/install.sh
-```
-
-The script requires [Go](https://go.dev) to be installed. During installation it prompts for the dashboard/PAC port and defaults to `8888`, so the dashboard is typically available at `http://localhost:8888` unless you choose a different port.
-
-**Useful commands installed alongside the binary:**
-
-| Command | Description |
-|---|---|
-| `tailhopper-logs` | Tail the live log output |
-| `tailhopper-uninstall` | Fully remove Tailhopper |
-
-**Service management:**
+Install with Homebrew:
 
 ```bash
-# View service status
-launchctl list | grep tailhopper
-
-# Restart
-launchctl unload ~/Library/LaunchAgents/com.tailhopper.plist
-launchctl load ~/Library/LaunchAgents/com.tailhopper.plist
-
-# Stop
-launchctl unload ~/Library/LaunchAgents/com.tailhopper.plist
+brew tap jcambass/tailhopper
+brew install tailhopper
+brew services start tailhopper
 ```
 
-**File locations (macOS):**
+Stop or uninstall:
 
-| Path | Purpose |
-|---|---|
-| `~/.local/bin/tailhopper` | Binary |
-| `~/Library/Application Support/Tailhopper/` | State & configuration |
-| `~/Library/Logs/Tailhopper/tailhopper.log` | Log output |
-| `~/Library/LaunchAgents/com.tailhopper.plist` | LaunchAgent definition |
+```bash
+brew services stop tailhopper
+brew uninstall tailhopper
+```
+
+### Linux
+
+Download and install the binary:
+
+```bash
+VERSION=v0.1.0  # or use 'latest'
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+ARCHIVE="https://github.com/jcambass/tailhopper/releases/download/${VERSION}/tailhopper_linux_${ARCH}.tar.gz"
+
+mkdir -p ~/.local/bin ~/.local/share/tailhopper
+curl -fsSL "$ARCHIVE" | tar xz -C ~/.local/bin --strip-components 2 tailhopper_linux_${ARCH}/tailhopper
+
+# Install systemd user service
+mkdir -p ~/.config/systemd/user
+curl -fsSL "https://github.com/jcambass/tailhopper/releases/download/${VERSION}/tailhopper_linux_${ARCH}.tar.gz" | tar xz -C /tmp
+cp /tmp/tailhopper_linux_${ARCH}/tailhopper.service ~/.config/systemd/user/
+
+systemctl --user daemon-reload
+systemctl --user enable --now tailhopper
+```
+
+View logs:
+
+```bash
+journalctl --user -fu tailhopper
+```
+
+Stop or uninstall:
+
+```bash
+systemctl --user disable --now tailhopper
+rm ~/.local/bin/tailhopper ~/.config/systemd/user/tailhopper.service
+systemctl --user daemon-reload
+```
+
+### Windows
+
+Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it. To run as a background service, use your preferred Go service wrapper or task scheduler.
 
 ### Manual / other platforms
 
@@ -104,6 +118,37 @@ go build -o tailhopper ./cmd/tailhopper
 ```
 
 Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
+
+## Release process
+
+Releases are automated via [GoReleaser](https://goreleaser.com). When you push a `v*` tag, a GitHub Action automatically:
+
+1. Builds cross-platform binaries (macOS, Linux, Windows)
+2. Creates a GitHub Release with all artifacts
+
+### To release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The action uses the standard `GITHUB_TOKEN`, so no additional secrets are needed.
+
+### Homebrew formula updates
+
+The formula is maintained in this repo's `Formula/` directory and updated automatically on each release.
+
+On each release, GoReleaser updates the Homebrew formula in `Formula/` and commits it to this repository.
+
+Users can install via:
+
+```bash
+brew tap jcambass/tailhopper
+brew install tailhopper
+```
+
+
 
 ## Build
 

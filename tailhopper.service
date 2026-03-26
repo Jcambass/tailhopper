@@ -1,0 +1,18 @@
+[Unit]
+Description=Tailhopper - Use multiple Tailscale tailnets at the same time
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tailhopper
+WorkingDirectory=%h/.local/share/tailhopper
+Environment="HTTP_PORT=8888"
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tailhopper
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

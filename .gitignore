@@ -32,3 +32,7 @@ go.work
 /tsnet-state/
 /tailhopper.json
 /tailnets
+
+# GoReleaser
+dist/
+*.sum
