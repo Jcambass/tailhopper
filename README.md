@@ -125,9 +125,10 @@ Releases are automated via [GoReleaser](https://goreleaser.com). When you push a
 
 1. Builds cross-platform binaries (macOS, Linux, Windows)
 2. Creates a GitHub Release with all artifacts
+3. Generates the Homebrew cask and publishes it (adding to the top level `Casks` directory in this repo and committing the changes)
 
 ### To release:
-
+cat dist/homebrew/Casks/tailhopper.rb
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
@@ -135,11 +136,23 @@ git push origin v0.1.0
 
 The action uses the standard `GITHUB_TOKEN`, so no additional secrets are needed.
 
-### Homebrew formula updates
+### Testing the release process locally
 
-The formula is maintained in this repo's `Formula/` directory and updated automatically on each release.
+To validate the entire release pipeline (build, archive, checksum, Homebrew cask generation) without publishing:
 
-On each release, GoReleaser updates the Homebrew formula in `Formula/` and commits it to this repository.
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest release --clean --snapshot --skip=publish
+```
+
+This runs the full release process in the `dist/` directory with all platform-specific binaries, archives, checksums, and Homebrew cask files. The snapshot version will be `<commit>-SNAPSHOT`. This matches exactly what runs when you push a real tag.
+
+To validate the configuration syntax only:
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest check
+```
+
+### Installation via Homebrew
 
 Users can install via:
 
