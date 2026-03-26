@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/tailhopper
+ExecStart=%h/.local/bin/tailhopper
 WorkingDirectory=%h/.local/share/tailhopper
 Environment="HTTP_PORT=8888"
 StandardOutput=journal
