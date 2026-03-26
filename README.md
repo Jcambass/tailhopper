@@ -71,24 +71,19 @@ brew uninstall tailhopper
 
 ### Linux
 
-Download and install the binary:
+Run the install script (single command):
 
 ```bash
-VERSION=v0.1.0  # or use 'latest'
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-ARCHIVE="https://github.com/jcambass/tailhopper/releases/download/${VERSION}/tailhopper_linux_${ARCH}.tar.gz"
-
-mkdir -p ~/.local/bin ~/.local/share/tailhopper
-curl -fsSL "$ARCHIVE" | tar xz -C ~/.local/bin --strip-components 2 tailhopper_linux_${ARCH}/tailhopper
-
-# Install systemd user service
-mkdir -p ~/.config/systemd/user
-curl -fsSL "https://github.com/jcambass/tailhopper/releases/download/${VERSION}/tailhopper_linux_${ARCH}.tar.gz" | tar xz -C /tmp
-cp /tmp/tailhopper_linux_${ARCH}/tailhopper.service ~/.config/systemd/user/
-
-systemctl --user daemon-reload
-systemctl --user enable --now tailhopper
+curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
 ```
+
+Install a specific version:
+
+```bash
+VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
+```
+
+`VERSION=latest` works once at least one GitHub Release has been published.
 
 View logs:
 
