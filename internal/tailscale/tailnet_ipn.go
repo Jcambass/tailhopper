@@ -6,7 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jcambass/tailhopper/internal/socks"
-	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
+	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/ipn"
 )
 

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
-	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
+	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
 )

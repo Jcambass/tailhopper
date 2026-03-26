@@ -13,7 +13,7 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/tailscale"
-	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
+	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/util/dnsname"
 )
 
