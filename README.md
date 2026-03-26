@@ -61,29 +61,10 @@ brew install jcambass/homebrew-tap/tailhopper
 brew services start tailhopper
 ```
 
-Stop:
+To view stop and uninstall instructions after the initial install:
 
 ```bash
-brew services stop tailhopper
-```
-
-Uninstall:
-
-```bash
-brew uninstall tailhopper
-brew services cleanup
-```
-
-Use a custom dashboard port:
-
-```bash
-TAILHOPPER_HTTP_PORT=9999 brew services restart tailhopper
-```
-
-To also remove the state and log files:
-
-```bash
-rm -rf "$(brew --prefix)/var/tailhopper" "$(brew --prefix)/var/log/tailhopper.log"
+brew info tailhopper
 ```
 
 ### Linux
