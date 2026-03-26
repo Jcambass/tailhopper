@@ -64,6 +64,10 @@ func (s *TailnetSnapshot) String() string {
 }
 
 func NewTailnet(id int, tsnetStateDir string, hostname string, claimedMagicDNSSuffix string, terminalError string, userEnabled bool, socksPort int, observer TailnetObserver, newServer tsnetpkg.TSNetServerFactory) *Tailnet {
+	if observer == nil {
+		observer = noopObserver{}
+	}
+
 	t := &Tailnet{
 		id:                    id,
 		observer:              observer,
@@ -135,7 +139,7 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	// Record user's intent to enable the tailnet.
 	t.userState = UserEnabled
-	t.notifyUserStateChange(t.userState)
+	t.observer.OnUserStateChange(t.id, t.userState)
 
 	t.log().Debug("Starting tailnet")
 
@@ -223,7 +227,7 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.notifyUserStateChange(t.userState)
+	t.observer.OnUserStateChange(t.id, t.userState)
 
 	defer t.setState(StoppedState)
 
@@ -300,7 +304,7 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.notifyUserStateChange(t.userState)
+	t.observer.OnUserStateChange(t.id, t.userState)
 
 	// Set logging out state before releasing the lock so the UI can show it
 	// while the network call is in flight.
@@ -369,32 +373,7 @@ func (t *Tailnet) setState(state State) {
 	t.log().Debug("set state", slog.String("state", string(state)))
 
 	// Notify after releasing the lock to keep lock time minimal.
-	t.notify()
-}
-
-// notify broadcasts changes that do not require a state transition.
-func (t *Tailnet) notify() {
-	if t.observer != nil {
-		t.observer.OnBroadcast(t.id)
-	}
-}
-
-// notifyUserStateChange calls the observer if set.
-// Callers (Start, Stop, Logout) hold t.mu when invoking this; the observer
-// only acquires the registry lock, so there is no deadlock risk.
-func (t *Tailnet) notifyUserStateChange(s UserState) {
-	if t.observer != nil {
-		t.observer.OnUserStateChange(t.id, s)
-	}
-}
-
-// notifyTerminalErrorChange calls the observer if set.
-// Callers hold t.mu when invoking this; the observer only acquires the registry
-// lock, so there is no deadlock risk.
-func (t *Tailnet) notifyTerminalErrorChange(err string) {
-	if t.observer != nil {
-		t.observer.OnTerminalErrorChange(t.id, err)
-	}
+	t.observer.OnBroadcast(t.id)
 }
 
 func (t *Tailnet) log() *slog.Logger {

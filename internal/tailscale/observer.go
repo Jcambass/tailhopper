@@ -18,6 +18,14 @@ type TailnetObserver interface {
 	Claim(tailnetID int, suffix string) error
 }
 
+// noopObserver is a no-op implementation used when no observer is provided.
+type noopObserver struct{}
+
+func (noopObserver) OnBroadcast(int)                   {}
+func (noopObserver) OnUserStateChange(int, UserState)  {}
+func (noopObserver) OnTerminalErrorChange(int, string) {}
+func (noopObserver) Claim(int, string) error           { return nil }
+
 type AlreadyClaimedError struct {
 	Suffix string
 }

@@ -310,21 +310,21 @@ func TestTailnet_NotifyCallbacks(t *testing.T) {
 	t.Run("observer broadcast is called", func(t *testing.T) {
 		obs := newMockObserver()
 		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
-		tn.notify()
+		tn.observer.OnBroadcast(tn.id)
 		if len(obs.broadcastCalls) != 1 || obs.broadcastCalls[0] != 1 {
 			t.Errorf("expected broadcast call for tailnet 1, got %v", obs.broadcastCalls)
 		}
 	})
 
-	t.Run("nil observer doesn't panic", func(t *testing.T) {
+	t.Run("uses a dummy noop observer", func(t *testing.T) {
 		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, nil, nil)
-		tn.notify() // should not panic
+		tn.observer.OnBroadcast(tn.id) // should not panic
 	})
 
 	t.Run("user state change callback", func(t *testing.T) {
 		obs := newMockObserver()
 		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
-		tn.notifyUserStateChange(UserEnabled)
+		tn.observer.OnUserStateChange(tn.id, UserEnabled)
 		if len(obs.userStateCalls) != 1 || obs.userStateCalls[0].state != UserEnabled {
 			t.Errorf("expected UserEnabled callback, got %v", obs.userStateCalls)
 		}
@@ -333,7 +333,7 @@ func TestTailnet_NotifyCallbacks(t *testing.T) {
 	t.Run("terminal error change callback", func(t *testing.T) {
 		obs := newMockObserver()
 		tn := NewTailnet(1, "/tmp", "host", "", "", false, 1080, obs, nil)
-		tn.notifyTerminalErrorChange("boom")
+		tn.observer.OnTerminalErrorChange(tn.id, "boom")
 		if len(obs.terminalErrCalls) != 1 || obs.terminalErrCalls[0].err != "boom" {
 			t.Errorf("expected 'boom' callback, got %v", obs.terminalErrCalls)
 		}

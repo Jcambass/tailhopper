@@ -83,7 +83,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 	// Notify after releasing lock to keep lock time minimal.
 	if changed {
-		t.notify()
+		t.observer.OnBroadcast(t.id)
 	}
 }
 
@@ -177,13 +177,13 @@ func (t *Tailnet) setTerminalErrorLocked(errMsg string) bool {
 
 	if t.terminalError != errMsg {
 		t.terminalError = errMsg
-		t.notifyTerminalErrorChange(errMsg)
+		t.observer.OnTerminalErrorChange(t.id, errMsg)
 		changed = true
 	}
 
 	if t.userState != UserDisabled {
 		t.userState = UserDisabled
-		t.notifyUserStateChange(t.userState)
+		t.observer.OnUserStateChange(t.id, t.userState)
 		changed = true
 	}
 
