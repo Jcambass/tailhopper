@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/jcambass/tailhopper/internal/sse"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 	tsnetpkg "github.com/jcambass/tailhopper/tsnet"
 	"tailscale.com/util/dnsname"
 )
@@ -36,7 +36,7 @@ type PersistedTailnet struct {
 }
 
 type RegisteredTailnet struct {
-	*ts.Tailnet
+	*tailscale.Tailnet
 	// config is the persisted configuration for this tailnet.
 	config PersistedTailnet
 }
@@ -75,7 +75,7 @@ func (m *Registry) Claim(tailnetID int, suffix string) error {
 	// Check if the suffix is already claimed by another tailnet
 	for _, tailnet := range m.tailnets {
 		if tailnet.config.ClaimedMagicDNSSuffix == suffix {
-			return &ts.AlreadyClaimedError{Suffix: suffix}
+			return &tailscale.AlreadyClaimedError{Suffix: suffix}
 		}
 	}
 
@@ -133,7 +133,7 @@ func (m *Registry) Load() error {
 		onUserStateChange := m.userStateChangeCallback(c.ID)
 		onTerminalErrorChange := m.terminalErrorChangeCallback(c.ID)
 
-		tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
+		tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
 		m.tailnets[c.ID] = &RegisteredTailnet{
 			Tailnet: tailnet,
 			config:  c,
@@ -150,8 +150,8 @@ func (m *Registry) Load() error {
 
 // userStateChangeCallback returns a callback that persists the user's desired state for the tailnet with the given ID.
 // The callback is safe to call while the tailnet's lock is held, since it only acquires the registry lock.
-func (m *Registry) userStateChangeCallback(id int) func(ts.UserState) {
-	return func(s ts.UserState) {
+func (m *Registry) userStateChangeCallback(id int) func(tailscale.UserState) {
+	return func(s tailscale.UserState) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
@@ -160,7 +160,7 @@ func (m *Registry) userStateChangeCallback(id int) func(ts.UserState) {
 			return
 		}
 
-		tailnet.config.UserEnabled = s == ts.UserEnabled
+		tailnet.config.UserEnabled = s == tailscale.UserEnabled
 		_ = m.saveLocked()
 	}
 }
@@ -203,11 +203,11 @@ func (m *Registry) saveLocked() error {
 }
 
 // List returns all tailnets in the registry, sorted by their numeric ID.
-func (m *Registry) List() []*ts.Tailnet {
+func (m *Registry) List() []*tailscale.Tailnet {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var tailnets []*ts.Tailnet
+	var tailnets []*tailscale.Tailnet
 	for _, tailnet := range m.tailnets {
 		tailnets = append(tailnets, tailnet.Tailnet)
 	}
@@ -229,11 +229,11 @@ func (m *Registry) RestoreEnabledTailnets(ctx context.Context) {
 
 	for _, tailnet := range tailnets {
 		snapshot := tailnet.Snapshot()
-		if snapshot.UserState != ts.UserEnabled {
+		if snapshot.UserState != tailscale.UserEnabled {
 			continue
 		}
 
-		if snapshot.State != ts.StoppedState {
+		if snapshot.State != tailscale.StoppedState {
 			continue
 		}
 
@@ -255,7 +255,7 @@ func (m *Registry) RestoreEnabledTailnets(ctx context.Context) {
 // Add creates a new unconfigured tailnet with the given hostname and returns it.
 // If hostname is empty, a default one will be generated based on the machine's hostname.
 // Example: if the machine's hostname is "laptop", the generated hostname will be "laptop-tailhopper".
-func (m *Registry) Add(hostname string) (*ts.Tailnet, error) {
+func (m *Registry) Add(hostname string) (*tailscale.Tailnet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -298,7 +298,7 @@ func (m *Registry) Add(hostname string) (*ts.Tailnet, error) {
 	onTerminalErrorChange := m.terminalErrorChangeCallback(id)
 
 	// New tailnets start disabled; user_enabled will be persisted when the user starts it.
-	tailnet := ts.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
+	tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, broadcast, onUserStateChange, onTerminalErrorChange, tsnetpkg.NewRealTSNetServer)
 
 	m.tailnets[c.ID] = &RegisteredTailnet{
 		Tailnet: tailnet,
@@ -353,7 +353,7 @@ func (m *Registry) Delete(id int) error {
 }
 
 // Get retrieves a tailnet by ID. The boolean indicates if the tailnet was found.
-func (m *Registry) Get(id int) (*ts.Tailnet, bool) {
+func (m *Registry) Get(id int) (*tailscale.Tailnet, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

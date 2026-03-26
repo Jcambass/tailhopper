@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/internal/registry"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 // URLPath is the default URL path for serving the PAC file.
@@ -25,7 +25,7 @@ func writePAC(w http.ResponseWriter, content string) {
 	w.Write([]byte(content))
 }
 
-func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
+func buildPACForTailnets(tailnets []*tailscale.Tailnet) (string, []string) {
 	sb := strings.Builder{}
 	sb.WriteString("function FindProxyForURL(url, host) {\n")
 

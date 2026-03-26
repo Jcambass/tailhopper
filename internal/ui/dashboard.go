@@ -9,7 +9,7 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/registry"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 // ServeDashboard renders the main dashboard page.
@@ -56,7 +56,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			Hostname:   snapshot.Hostname,
 		}
 
-		if snapshot.State == ts.HasTerminalErrorState {
+		if snapshot.State == tailscale.HasTerminalErrorState {
 			terminalErr := snapshot.TerminalError
 			if terminalErr == "" {
 				terminalErr = "unknown error"
@@ -67,13 +67,13 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			continue
 		}
 
-		if snapshot.State == ts.NeedsLoginState {
+		if snapshot.State == tailscale.NeedsLoginState {
 			card.AuthURL = snapshot.LoginURL
 			data.Tailnets = append(data.Tailnets, card)
 			continue
 		}
 
-		if snapshot.State == ts.ConnectedState {
+		if snapshot.State == tailscale.ConnectedState {
 			socksAddr := tailnet.SocksAddr()
 			socksHost, socksPort, _ := net.SplitHostPort(socksAddr)
 			card.SocksAddr = socksAddr
@@ -115,7 +115,7 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 				return strings.ToLower(card.Machines[i].DNSName) < strings.ToLower(card.Machines[j].DNSName)
 			})
 
-			card.stateName = ts.ConnectedState
+			card.stateName = tailscale.ConnectedState
 
 			data.Tailnets = append(data.Tailnets, card)
 			continue

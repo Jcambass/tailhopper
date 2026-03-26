@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
-func mockTailnet(id int, suffix string, socksPort int) *ts.Tailnet {
-	return ts.NewTailnet(id, "/tmp/test", "host", suffix, "", false, socksPort, nil, nil, nil, nil, nil)
+func mockTailnet(id int, suffix string, socksPort int) *tailscale.Tailnet {
+	return tailscale.NewTailnet(id, "/tmp/test", "host", suffix, "", false, socksPort, nil, nil, nil, nil, nil)
 }
 
 func TestBuildPACForTailnets_Empty(t *testing.T) {
@@ -27,7 +27,7 @@ func TestBuildPACForTailnets_Empty(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_SingleTailnet(t *testing.T) {
-	tailnets := []*ts.Tailnet{
+	tailnets := []*tailscale.Tailnet{
 		mockTailnet(1, "my-tailnet.ts.net", 1080),
 	}
 
@@ -48,7 +48,7 @@ func TestBuildPACForTailnets_SingleTailnet(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_MultipleTailnets(t *testing.T) {
-	tailnets := []*ts.Tailnet{
+	tailnets := []*tailscale.Tailnet{
 		mockTailnet(1, "first.ts.net", 1080),
 		mockTailnet(2, "second.ts.net", 1081),
 	}
@@ -73,7 +73,7 @@ func TestBuildPACForTailnets_MultipleTailnets(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_SkipsUnconfigured(t *testing.T) {
-	tailnets := []*ts.Tailnet{
+	tailnets := []*tailscale.Tailnet{
 		mockTailnet(1, "configured.ts.net", 1080),
 		mockTailnet(2, "", 1081),
 	}

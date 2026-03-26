@@ -1,4 +1,4 @@
-package ts
+package tailscale
 
 // ipnProcessor is a fluent builder for processing IPN state transitions.
 type ipnProcessor struct {

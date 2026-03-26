@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 	"github.com/jcambass/tailhopper/internal/ui"
 )
 
@@ -112,7 +112,7 @@ func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaste
 		}
 
 		snapshot := tailnet.Snapshot()
-		if snapshot.State == ts.HasTerminalErrorState {
+		if snapshot.State == tailscale.HasTerminalErrorState {
 			slog.InfoContext(r.Context(), "skipping logout for terminal-error tailnet",
 				slog.String("component", "httprequests"),
 				slog.Int("id", id),
@@ -160,7 +160,7 @@ func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaste
 		w.WriteHeader(http.StatusOK)
 
 		var message, toastType string
-		if snapshot.State == ts.HasTerminalErrorState {
+		if snapshot.State == tailscale.HasTerminalErrorState {
 			message = "Tailnet deleted successfully"
 			toastType = "success"
 		} else if logoutErr == nil {

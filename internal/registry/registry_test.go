@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 type mockBroadcasterReg struct {
@@ -114,11 +114,11 @@ func TestRegistry_Add(t *testing.T) {
 	if snap.Hostname != "my-host" {
 		t.Errorf("hostname = %q, want %q", snap.Hostname, "my-host")
 	}
-	if snap.State != ts.StoppedState {
-		t.Errorf("state = %q, want %q", snap.State, ts.StoppedState)
+	if snap.State != tailscale.StoppedState {
+		t.Errorf("state = %q, want %q", snap.State, tailscale.StoppedState)
 	}
-	if snap.UserState != ts.UserDisabled {
-		t.Errorf("user state = %q, want %q", snap.UserState, ts.UserDisabled)
+	if snap.UserState != tailscale.UserDisabled {
+		t.Errorf("user state = %q, want %q", snap.UserState, tailscale.UserDisabled)
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Error("expected config file to be created")
@@ -314,7 +314,7 @@ func TestRegistry_Claim(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for duplicate claim")
 		}
-		if _, ok := err.(*ts.AlreadyClaimedError); !ok {
+		if _, ok := err.(*tailscale.AlreadyClaimedError); !ok {
 			t.Fatalf("expected AlreadyClaimedError, got %T: %v", err, err)
 		}
 	})
@@ -380,7 +380,7 @@ func TestRegistry_TerminalErrorFromPersistence(t *testing.T) {
 	if snap.TerminalError != "old error" {
 		t.Errorf("terminal error = %q, want %q", snap.TerminalError, "old error")
 	}
-	if snap.State != ts.HasTerminalErrorState {
-		t.Errorf("state = %q, want %q", snap.State, ts.HasTerminalErrorState)
+	if snap.State != tailscale.HasTerminalErrorState {
+		t.Errorf("state = %q, want %q", snap.State, tailscale.HasTerminalErrorState)
 	}
 }
