@@ -126,6 +126,12 @@ rm ~/.local/bin/tailhopper ~/.config/systemd/user/tailhopper.service
 systemctl --user daemon-reload
 ```
 
+To also remove state files:
+
+```bash
+rm -rf ~/.local/share/tailhopper
+```
+
 ### Windows
 
 Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it. To run as a background service, use your preferred Go service wrapper or task scheduler.
@@ -150,7 +156,16 @@ Tailhopper is configured via environment variables:
 | `HTTP_PORT` | `8888` | Dashboard and PAC file port |
 | `LOG_LEVEL` | `INFO` | Log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
-Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
+Tailhopper stores state in its working directory:
+
+- `tailhopper.json`
+- `tailnets/` (per-tailnet runtime/state data)
+
+Common working directories:
+
+- Homebrew service (macOS): `$(brew --prefix)/var/tailhopper`
+- Linux installer (systemd user service): `~/.local/share/tailhopper`
+- Manual runs: current working directory
 
 ## Logs
 
