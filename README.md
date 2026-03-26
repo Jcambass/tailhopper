@@ -67,6 +67,19 @@ Stop or uninstall:
 ```bash
 brew services stop tailhopper
 brew uninstall tailhopper
+brew services cleanup
+```
+
+Use a custom dashboard port:
+
+```bash
+TAILHOPPER_HTTP_PORT=9999 brew services restart tailhopper
+```
+
+To also remove the state and log files:
+
+```bash
+rm -rf "$(brew --prefix)/var/tailhopper" "$(brew --prefix)/var/log/tailhopper.log"
 ```
 
 ### Linux
@@ -120,7 +133,10 @@ Releases are automated via [GoReleaser](https://goreleaser.com). When you push a
 
 1. Builds cross-platform binaries (macOS, Linux, Windows)
 2. Creates a GitHub Release with all artifacts
-3. Generates the Homebrew cask and publishes it (adding to the top level `Casks` directory in this repo and committing the changes)
+
+After a release, the Homebrew formula is updated automatically by
+`mislav/bump-homebrew-formula-action` (it bumps `url`/`sha256` in
+`Formula/tailhopper.rb` on `main`).
 
 ### To release:
 
@@ -129,17 +145,18 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The action uses the standard `GITHUB_TOKEN`, so no additional secrets are needed.
+The workflow uses the standard `GITHUB_TOKEN`; no additional secret is required
+for updating this repository's own formula.
 
 ### Testing the release process locally
 
-To validate the entire release pipeline (build, archive, checksum, Homebrew cask generation) without publishing:
+To validate the entire release pipeline (build, archive, checksum generation) without publishing:
 
 ```bash
 go run github.com/goreleaser/goreleaser/v2@latest release --clean --snapshot --skip=publish
 ```
 
-This runs the full release process in the `dist/` directory with all platform-specific binaries, archives, checksums, and Homebrew cask files. The snapshot version will be `<commit>-SNAPSHOT`. This matches exactly what runs when you push a real tag.
+This runs the full release process in the `dist/` directory with all platform-specific binaries, archives, and checksums. The snapshot version will be `<commit>-SNAPSHOT`. This matches exactly what runs when you push a real tag.
 
 To validate the configuration syntax only:
 

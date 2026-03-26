@@ -6,6 +6,8 @@ builds:
   - id: linux
     main: ./cmd/tailhopper
     binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
@@ -17,6 +19,8 @@ builds:
   - id: darwin
     main: ./cmd/tailhopper
     binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
@@ -28,6 +32,8 @@ builds:
   - id: windows
     main: ./cmd/tailhopper
     binary: tailhopper
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
@@ -63,16 +69,4 @@ release:
     owner: jcambass
     name: tailhopper
 
-homebrew_casks:
-  - name: tailhopper
-    repository:
-      owner: jcambass
-      name: tailhopper
-      branch: main
-    directory: Casks
-    homepage: https://github.com/jcambass/tailhopper
-    description: Use multiple Tailscale tailnets at the same time
-    license: MIT
-    skip_upload: false
-    binaries:
-      - tailhopper
+
