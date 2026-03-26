@@ -54,7 +54,8 @@ From there you can:
 
 ### macOS
 
-Install with Homebrew:
+#### Using Homebrew (recommended)
+Install with Homebrew (recommended):
 
 ```bash
 brew install jcambass/homebrew-tap/tailhopper
@@ -67,9 +68,13 @@ To view stop and uninstall instructions after the initial install:
 brew info tailhopper
 ```
 
+#### Manual installation
+
+Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it directly. To run as a background service, create your own launchd user agent.
+
 ### Linux
 
-Run the install script (single command):
+#### Using the install script (recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
@@ -112,6 +117,10 @@ To also remove state files:
 ```bash
 rm -rf ~/.local/share/tailhopper
 ```
+
+#### Manual installation
+
+Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it directly. To run as a background service, create your own systemd user service.
 
 ### Windows
 
