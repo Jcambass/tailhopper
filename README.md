@@ -101,15 +101,19 @@ Install a specific version:
 VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/jcambass/tailhopper/main/linux/install.sh | bash
 ```
 
-`VERSION=latest` works once at least one GitHub Release has been published.
-
 View logs:
 
 ```bash
 journalctl --user -fu tailhopper
 ```
 
-Stop or uninstall:
+Stop:
+
+```bash
+systemctl --user disable --now tailhopper
+```
+
+Uninstall:
 
 ```bash
 systemctl --user disable --now tailhopper
@@ -121,7 +125,9 @@ systemctl --user daemon-reload
 
 Download the binary from [Releases](https://github.com/jcambass/tailhopper/releases) and run it. To run as a background service, use your preferred Go service wrapper or task scheduler.
 
-### Manual / other platforms
+### Build from source
+
+Requires Go 1.22+.
 
 ```bash
 git clone https://github.com/jcambass/tailhopper.git
@@ -130,69 +136,7 @@ go build -o tailhopper ./cmd/tailhopper
 ./tailhopper
 ```
 
-Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
-
-## Release process
-
-Releases are automated via [GoReleaser](https://goreleaser.com). When you push a `v*` tag, a GitHub Action automatically:
-
-1. Builds cross-platform binaries (macOS, Linux, Windows)
-2. Creates a GitHub Release with all artifacts
-
-After a release, the Homebrew formula is updated automatically by
-`mislav/bump-homebrew-formula-action` (it bumps `url`/`sha256` in
-`Formula/tailhopper.rb` on `main`).
-
-### To release:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The workflow uses the standard `GITHUB_TOKEN`; no additional secret is required
-for updating this repository's own formula.
-
-### Testing the release process locally
-
-To validate the entire release pipeline (build, archive, checksum generation) without publishing:
-
-```bash
-go run github.com/goreleaser/goreleaser/v2@latest release --clean --snapshot --skip=publish
-```
-
-This runs the full release process in the `dist/` directory with all platform-specific binaries, archives, and checksums. The snapshot version will be `<commit>-SNAPSHOT`. This matches exactly what runs when you push a real tag.
-
-To validate the configuration syntax only:
-
-```bash
-go run github.com/goreleaser/goreleaser/v2@latest check
-```
-
-### Installation via Homebrew
-
-Users can install via:
-
-```bash
-brew tap jcambass/tailhopper
-brew install tailhopper
-```
-
-## Build
-
-Requires Go 1.22+.
-
-```bash
-go build ./...
-```
-
-To produce the release binary:
-
-```bash
-go build -o tailhopper ./cmd/tailhopper
-```
-
-## Configuration
+## Configuration & State
 
 Tailhopper is configured via environment variables:
 
@@ -201,10 +145,54 @@ Tailhopper is configured via environment variables:
 | `HTTP_PORT` | `8888` | Dashboard and PAC file port |
 | `LOG_LEVEL` | `INFO` | Log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
+Tailhopper writes its state file (`tailhopper.json`) to the working directory it is started from.
+
 ## Logs
 
 Tailhopper outputs structured logs in [logfmt](https://brandur.org/logfmt) format to stderr. For colored output, pipe through [hl](https://github.com/pamburus/hl):
 
 ```bash
 ./tailhopper 2>&1 | hl
+```
+
+## Release process
+
+This section is for maintainers.
+
+Releases are automated via [GoReleaser](https://goreleaser.com). When you push a `v*` tag, GitHub Actions automatically:
+
+1. Builds cross-platform binaries (macOS, Linux, Windows)
+2. Creates a GitHub Release with artifacts
+3. Updates `Formula/tailhopper.rb` (`url` and `sha256`) via `mislav/bump-homebrew-formula-action`
+
+### Publish a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow uses the repository `GITHUB_TOKEN`; no extra secret is required to update this repo's Homebrew formula.
+
+### Validate release pipeline locally
+
+Run a full local snapshot release (no publish):
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest release --clean --snapshot --skip=publish
+```
+
+Validate config only:
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest check
+```
+
+### Test Homebrew formula locally
+
+Before testing the Homebrew formula, make sure to update `Formula/tailhopper.rb` with the latest release `url` and `sha256`.
+We do not use goreleaser for this since it only supports Homebrew casks but we want a formula for better macOS launchd integration.
+
+```bash
+HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source --verbose --debug tailhopper
 ```
