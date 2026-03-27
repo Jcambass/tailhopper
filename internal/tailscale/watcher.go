@@ -1,4 +1,4 @@
-package ts
+package tailscale
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
-	"tailscale.com/client/local"
+	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/ipn"
 	"tailscale.com/tailcfg"
 )
@@ -20,13 +20,19 @@ type watcher struct {
 	wg          *sync.WaitGroup
 	cancel      context.CancelFunc
 	logger      *slog.Logger
-	localClient *local.Client
+	localClient tsnetpkg.LocalClient
 	onState     func(context.Context, IPNState)
 }
 
+// watcherShutdownTimeout is how long Close waits for the watcher goroutine to
+// exit after cancelling its context. If the goroutine is stuck in a blocking
+// WatchIPNBus or Next call, we log an error and return rather than block
+// indefinitely.
+const watcherShutdownTimeout = 5 * time.Second
+
 // NewWatcher creates and starts a new IPN bus watcher.
 // The caller must call Close() to clean up resources.
-func NewWatcher(localClient *local.Client, onState func(context.Context, IPNState), tailnetID int) (*watcher, error) {
+func NewWatcher(localClient tsnetpkg.LocalClient, onState func(context.Context, IPNState), tailnetID int) (*watcher, error) {
 	w := &watcher{
 		wg:          &sync.WaitGroup{},
 		logger:      slog.Default().With(slog.String("component", "watcher"), slog.Int("tailnet_id", tailnetID)),
@@ -55,12 +61,12 @@ func (w *watcher) start() error {
 		defer w.logger.Debug("IPN watcher goroutine exiting")
 
 		watcher, err := w.localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
+		if err != nil && ctx.Err() != nil {
+			w.logger.Debug("IPN watcher canceled before subscription was established", slog.Any("error", err))
+			return
+		}
 		if err != nil {
-			if ctx.Err() != nil {
-				w.logger.Debug("IPN watcher canceled before subscription was established", slog.Any("error", err))
-			} else {
-				w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
-			}
+			w.logger.Error("failed to watch IPN bus", slog.Any("error", err))
 			return
 		}
 		defer func() {
@@ -71,13 +77,12 @@ func (w *watcher) start() error {
 
 		for {
 			n, err := watcher.Next()
+			if err != nil && ctx.Err() != nil {
+				w.logger.Debug("IPN watcher stopped", slog.Any("error", err))
+				return
+			}
 			if err != nil {
-				if ctx.Err() != nil {
-					w.logger.Debug("IPN watcher stopped", slog.Any("error", err))
-				} else {
-					w.logger.Warn("IPN watcher error", slog.Any("error", err))
-				}
-
+				w.logger.Warn("IPN watcher error", slog.Any("error", err))
 				return
 			}
 
@@ -114,7 +119,7 @@ func (w *watcher) Close() error {
 	select {
 	case <-done:
 		w.logger.Debug("IPN watcher stopped successfully")
-	case <-time.After(5 * time.Second):
+	case <-time.After(watcherShutdownTimeout):
 		w.logger.Error("IPN watcher shutdown timeout - goroutine did not exit")
 	}
 	return nil

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/internal/registry"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 // URLPath is the default URL path for serving the PAC file.
@@ -25,7 +25,7 @@ func writePAC(w http.ResponseWriter, content string) {
 	w.Write([]byte(content))
 }
 
-func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
+func buildPACForTailnets(tailnets []*tailscale.Tailnet) (string, []string) {
 	sb := strings.Builder{}
 	sb.WriteString("function FindProxyForURL(url, host) {\n")
 
@@ -43,6 +43,9 @@ func buildPACForTailnets(tailnets []*ts.Tailnet) (string, []string) {
 		socksAddr := t.SocksAddr()
 
 		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", suffix))
+		// PAC fallback chain: browsers try each entry in order.
+		// SOCKS5 (RFC 1928) is preferred; SOCKS (v4) is a fallback for
+		// older clients; DIRECT ensures connectivity if the proxy is down.
 		sb.WriteString(fmt.Sprintf("        return \"SOCKS5 %s; SOCKS %s; DIRECT\";\n", socksAddr, socksAddr))
 		sb.WriteString("    }\n")
 	}
