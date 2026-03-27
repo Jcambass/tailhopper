@@ -110,7 +110,10 @@ func (t *Tailnet) SocksAddr() string {
 func (t *Tailnet) Snapshot() TailnetSnapshot {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	return t.snapshotLocked()
+}
 
+func (t *Tailnet) snapshotLocked() TailnetSnapshot {
 	hostname := t.userSetHostname
 	if t.selfNodeHostname != "" {
 		hostname = t.selfNodeHostname
@@ -139,7 +142,6 @@ func (t *Tailnet) Start(ctx context.Context) error {
 
 	// Record user's intent to enable the tailnet.
 	t.userState = UserEnabled
-	t.observer.OnUserStateChange(t.id, t.userState)
 
 	t.log().Debug("Starting tailnet")
 
@@ -228,7 +230,6 @@ func (t *Tailnet) Stop(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.observer.OnUserStateChange(t.id, t.userState)
 
 	defer t.setState(StoppedState)
 
@@ -305,7 +306,6 @@ func (t *Tailnet) Logout(ctx context.Context) error {
 
 	// Record user's intent to disable the tailnet.
 	t.userState = UserDisabled
-	t.observer.OnUserStateChange(t.id, t.userState)
 
 	// Set logging out state before releasing the lock so the UI can show it
 	// while the network call is in flight.
@@ -367,14 +367,13 @@ func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, err
 // Internal state management functions
 ////
 
-// setState updates the current state and notifies listeners.
+// setState updates the current state and notifies the observer with a snapshot.
 func (t *Tailnet) setState(state State) {
 	t.currentState = state
 
 	t.log().Debug("set state", slog.String("state", string(state)))
 
-	// Notify after releasing the lock to keep lock time minimal.
-	t.observer.OnBroadcast(t.id)
+	t.observer.OnChange(t.snapshotLocked())
 }
 
 func (t *Tailnet) log() *slog.Logger {

@@ -138,41 +138,22 @@ func (m *Registry) Load() error {
 	return nil
 }
 
-// OnBroadcast is called when a tailnet's state changes and listeners should be notified.
-func (m *Registry) OnBroadcast(tailnetID int) {
+// OnChange persists relevant fields from the snapshot and broadcasts the change.
+func (m *Registry) OnChange(snapshot tailscale.TailnetSnapshot) {
+	m.mu.Lock()
+
+	tailnet, ok := m.tailnets[snapshot.ID]
+	if ok {
+		tailnet.config.UserEnabled = snapshot.UserState == tailscale.UserEnabled
+		tailnet.config.TerminalError = snapshot.TerminalError
+		_ = m.saveLocked()
+	}
+
+	m.mu.Unlock()
+
 	if m.broadcaster != nil {
-		m.broadcaster.BroadcastTailnetChange(tailnetID)
+		m.broadcaster.BroadcastTailnetChange(snapshot.ID)
 	}
-}
-
-// OnUserStateChange persists the user's desired state for the given tailnet.
-// Safe to call while the tailnet's lock is held, since it only acquires the registry lock.
-func (m *Registry) OnUserStateChange(tailnetID int, state tailscale.UserState) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	tailnet, ok := m.tailnets[tailnetID]
-	if !ok {
-		return
-	}
-
-	tailnet.config.UserEnabled = state == tailscale.UserEnabled
-	_ = m.saveLocked()
-}
-
-// OnTerminalErrorChange persists a terminal error for the given tailnet.
-// Safe to call while the tailnet's lock is held, since it only acquires the registry lock.
-func (m *Registry) OnTerminalErrorChange(tailnetID int, errMsg string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	tailnet, ok := m.tailnets[tailnetID]
-	if !ok {
-		return
-	}
-
-	tailnet.config.TerminalError = errMsg
-	_ = m.saveLocked()
 }
 
 func (m *Registry) saveLocked() error {

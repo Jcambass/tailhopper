@@ -77,6 +77,11 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		terminalCleanup = t.prepareTerminalErrorCleanupLocked()
 	}
 
+	var snapshot TailnetSnapshot
+	if changed {
+		snapshot = t.snapshotLocked()
+	}
+
 	t.mu.Unlock()
 
 	// Run cleanup outside the lock: closing the server, watcher, and SOCKS proxy
@@ -85,7 +90,7 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 	// Notify after releasing lock to keep lock time minimal.
 	if changed {
-		t.observer.OnBroadcast(t.id)
+		t.observer.OnChange(snapshot)
 	}
 }
 
@@ -181,13 +186,11 @@ func (t *Tailnet) setTerminalErrorLocked(errMsg string) bool {
 
 	if t.terminalError != errMsg {
 		t.terminalError = errMsg
-		t.observer.OnTerminalErrorChange(t.id, errMsg)
 		changed = true
 	}
 
 	if t.userState != UserDisabled {
 		t.userState = UserDisabled
-		t.observer.OnUserStateChange(t.id, t.userState)
 		changed = true
 	}
 

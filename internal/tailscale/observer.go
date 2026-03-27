@@ -13,12 +13,9 @@ import (
 // cycle: the tailscale package depends only on this interface, not on the
 // registry package.
 type TailnetObserver interface {
-	// OnBroadcast is called when the tailnet's state changes and listeners should be notified.
-	OnBroadcast(tailnetID int)
-	// OnUserStateChange is called when the user's desired state changes.
-	OnUserStateChange(tailnetID int, state UserState)
-	// OnTerminalErrorChange is called when a fatal terminal error is set.
-	OnTerminalErrorChange(tailnetID int, err string)
+	// OnChange is called when the tailnet's state changes.
+	// The snapshot contains the full state at the time of the change.
+	OnChange(snapshot TailnetSnapshot)
 	// Claim attempts to claim the given MagicDNS suffix for the specified tailnet ID.
 	// It returns an error if the suffix is already claimed by another tailnet.
 	Claim(tailnetID int, suffix string) error
@@ -27,10 +24,8 @@ type TailnetObserver interface {
 // noopObserver is a no-op implementation used when no observer is provided.
 type noopObserver struct{}
 
-func (noopObserver) OnBroadcast(int)                   {}
-func (noopObserver) OnUserStateChange(int, UserState)  {}
-func (noopObserver) OnTerminalErrorChange(int, string) {}
-func (noopObserver) Claim(int, string) error           { return nil }
+func (noopObserver) OnChange(TailnetSnapshot) {}
+func (noopObserver) Claim(int, string) error  { return nil }
 
 type AlreadyClaimedError struct {
 	Suffix string
