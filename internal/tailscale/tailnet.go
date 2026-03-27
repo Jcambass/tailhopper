@@ -376,6 +376,24 @@ func (t *Tailnet) setState(state State) {
 	t.observer.OnChange(t.snapshotLocked())
 }
 
+// SetTerminalError puts the tailnet into a fatal error state, cleans up
+// running components, and notifies the observer.
+func (t *Tailnet) SetTerminalError(errMsg string) {
+	t.mu.Lock()
+
+	t.terminalError = errMsg
+	t.userState = UserDisabled
+	t.currentState = HasTerminalErrorState
+
+	cleanup := t.prepareTerminalErrorCleanupLocked()
+	snapshot := t.snapshotLocked()
+
+	t.mu.Unlock()
+
+	cleanup.run(t)
+	t.observer.OnChange(snapshot)
+}
+
 func (t *Tailnet) log() *slog.Logger {
 	t.logMu.RLock()
 	defer t.logMu.RUnlock()

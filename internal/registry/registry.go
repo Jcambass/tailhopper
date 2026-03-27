@@ -68,41 +68,6 @@ func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
 	return m, nil
 }
 
-func (m *Registry) Claim(tailnetID int, suffix string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check if the suffix is already claimed by another tailnet
-	for _, tailnet := range m.tailnets {
-		if tailnet.config.ClaimedMagicDNSSuffix == suffix {
-			return &tailscale.AlreadyClaimedError{Suffix: suffix}
-		}
-	}
-
-	tailnet, ok := m.tailnets[tailnetID]
-	if !ok {
-		return fmt.Errorf("tailnet not found")
-	}
-
-	// Update the config for this tailnet
-	tailnet.config.ClaimedMagicDNSSuffix = suffix
-
-	// Persist the change to disk
-	if err := m.saveLocked(); err != nil {
-		return err
-	}
-
-	// Setting the claimed suffix on the tailnet instance itself is done in the caller after a successful claim.
-	// Notifying about the state change for that tailnet specifically is also done in the caller.
-
-	if m.broadcaster != nil {
-		// Notify globally since per definition, we now have no more unconfigured tailnets
-		m.broadcaster.BroadcastGlobalChange()
-	}
-
-	return nil
-}
-
 // Load reads the config file and initializes the in-memory state.
 func (m *Registry) Load() error {
 	m.mu.Lock()
@@ -138,20 +103,50 @@ func (m *Registry) Load() error {
 	return nil
 }
 
-// OnChange persists relevant fields from the snapshot and broadcasts the change.
+// OnChange persists relevant fields from the snapshot, detects MagicDNS suffix
+// conflicts, and broadcasts changes to SSE listeners.
 func (m *Registry) OnChange(snapshot tailscale.TailnetSnapshot) {
 	m.mu.Lock()
 
 	tailnet, ok := m.tailnets[snapshot.ID]
-	if ok {
-		tailnet.config.UserEnabled = snapshot.UserState == tailscale.UserEnabled
-		tailnet.config.TerminalError = snapshot.TerminalError
-		_ = m.saveLocked()
+	if !ok {
+		m.mu.Unlock()
+		return
 	}
 
+	tailnet.config.UserEnabled = snapshot.UserState == tailscale.UserEnabled
+	tailnet.config.TerminalError = snapshot.TerminalError
+
+	// Detect a newly discovered MagicDNS suffix (only when the tailnet is healthy).
+	var suffixConflict string
+	newSuffix := snapshot.TerminalError == "" &&
+		snapshot.MagicDNSSuffix != "" &&
+		snapshot.MagicDNSSuffix != tailnet.config.ClaimedMagicDNSSuffix
+
+	if newSuffix {
+		for _, other := range m.tailnets {
+			if other.config.ID != snapshot.ID && other.config.ClaimedMagicDNSSuffix == snapshot.MagicDNSSuffix {
+				suffixConflict = fmt.Sprintf("magic DNS suffix '%s' is already claimed by another tailnet", snapshot.MagicDNSSuffix)
+				break
+			}
+		}
+		if suffixConflict == "" {
+			tailnet.config.ClaimedMagicDNSSuffix = snapshot.MagicDNSSuffix
+		}
+	}
+
+	_ = m.saveLocked()
 	m.mu.Unlock()
 
+	if suffixConflict != "" {
+		tailnet.Tailnet.SetTerminalError(suffixConflict)
+		return // SetTerminalError will trigger OnChange again to persist the error state.
+	}
+
 	if m.broadcaster != nil {
+		if newSuffix {
+			m.broadcaster.BroadcastGlobalChange()
+		}
 		m.broadcaster.BroadcastTailnetChange(snapshot.ID)
 	}
 }

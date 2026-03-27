@@ -2,7 +2,6 @@ package tailscale
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/jcambass/tailhopper/internal/socks"
@@ -18,7 +17,6 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 
 	state := t.currentState
 	var changed bool
-	var terminalCleanup terminalCleanup
 
 	switch state {
 	case ConnectedState:
@@ -73,20 +71,12 @@ func (t *Tailnet) reactToIPNStateChange(ctx context.Context, ipnState IPNState) 
 		// Simply ignore IPN state changes in any other state.
 	}
 
-	if t.currentState == HasTerminalErrorState {
-		terminalCleanup = t.prepareTerminalErrorCleanupLocked()
-	}
-
 	var snapshot TailnetSnapshot
 	if changed {
 		snapshot = t.snapshotLocked()
 	}
 
 	t.mu.Unlock()
-
-	// Run cleanup outside the lock: closing the server, watcher, and SOCKS proxy
-	// involves blocking I/O that must not hold mu.
-	terminalCleanup.run(t)
 
 	// Notify after releasing lock to keep lock time minimal.
 	if changed {
@@ -109,19 +99,6 @@ func (t *Tailnet) maybeClaimMagicDNSSuffixLocked(ipnState IPNState) bool {
 		return false
 	}
 
-	if err := t.observer.Claim(t.id, ipnState.MagicDNSSuffix); err != nil {
-		if claimErr, ok := errors.AsType[*AlreadyClaimedError](err); ok {
-			t.log().Error("magic DNS suffix claim error", slog.Any("error", claimErr))
-			// A duplicate claim is fatal: disable the tailnet and keep it in an
-			// unrecoverable error state until the user deletes/recreates it.
-			return t.setTerminalErrorLocked(claimErr.Error())
-		}
-
-		t.log().Error("failed to claim MagicDNS suffix", slog.String("suffix", ipnState.MagicDNSSuffix), slog.Any("error", err))
-		return false
-	}
-
-	// Successfully claimed the MagicDNS suffix.
 	t.claimedMagicDNSSuffix = ipnState.MagicDNSSuffix
 
 	// Update logger with the new suffix
@@ -179,27 +156,6 @@ func (t *Tailnet) maybeUpdateSelfNodeHostnameLocked(ipnState IPNState) bool {
 	}
 	t.selfNodeHostname = hostname
 	return true
-}
-
-func (t *Tailnet) setTerminalErrorLocked(errMsg string) bool {
-	changed := false
-
-	if t.terminalError != errMsg {
-		t.terminalError = errMsg
-		changed = true
-	}
-
-	if t.userState != UserDisabled {
-		t.userState = UserDisabled
-		changed = true
-	}
-
-	if t.currentState != HasTerminalErrorState {
-		t.currentState = HasTerminalErrorState
-		changed = true
-	}
-
-	return changed
 }
 
 type terminalCleanup struct {
