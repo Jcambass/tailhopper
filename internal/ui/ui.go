@@ -4,12 +4,13 @@ package ui
 import (
 	"embed"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
 
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 //go:embed templates/*.html templates/partials/*.html templates/partials/*.svg static/*
@@ -91,8 +92,8 @@ type tailnetCard struct {
 	SocksHost  string
 	SocksPort  string
 	Machines   []machineView
-	stateName  ts.State
-	userState  ts.UserState
+	stateName  tailscale.State
+	userState  tailscale.UserState
 	Hostname   string
 	AuthURL    string
 	ErrorMsg   string
@@ -100,31 +101,32 @@ type tailnetCard struct {
 
 func (c tailnetCard) StateClass() StateClass {
 	switch c.stateName {
-	case ts.ConnectedState:
+	case tailscale.ConnectedState:
 		return StateClassConnected
-	case ts.HasTerminalErrorState:
+	case tailscale.HasTerminalErrorState:
 		return StateClassError
-	case ts.NeedsLoginState:
+	case tailscale.NeedsLoginState:
 		return StateClassNeedsLogin
-	case ts.NeedsMachineAuthState:
+	case tailscale.NeedsMachineAuthState:
 		return StateClassNeedsAuth
-	case ts.StartedState:
+	case tailscale.StartedState:
 		return StateClassConnecting
-	case ts.StoppedState:
+	case tailscale.StoppedState:
 		return StateClassDisabled
-	case ts.LoggingOutState:
+	case tailscale.LoggingOutState:
 		return StateClassLoggingOut
 	default:
-		panic("unexpected state name: " + string(c.stateName))
+		slog.Error("unknown tailnet state, rendering as disabled", slog.String("component", "ui"), slog.String("state", string(c.stateName)))
+		return StateClassDisabled
 	}
 }
 
 func (c tailnetCard) IsToggleOn() bool {
-	return c.userState == ts.UserEnabled
+	return c.userState == tailscale.UserEnabled
 }
 
 func (c tailnetCard) IsToggleDisabled() bool {
-	return c.stateName == ts.HasTerminalErrorState || c.stateName == ts.LoggingOutState
+	return c.stateName == tailscale.HasTerminalErrorState || c.stateName == tailscale.LoggingOutState
 }
 
 func (c tailnetCard) ToggleAction() string {
@@ -135,7 +137,7 @@ func (c tailnetCard) ToggleAction() string {
 }
 
 func (c tailnetCard) IsErrorState() bool {
-	return c.stateName == ts.HasTerminalErrorState
+	return c.stateName == tailscale.HasTerminalErrorState
 }
 
 // machineView represents a machine for display.

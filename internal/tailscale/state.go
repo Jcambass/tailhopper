@@ -1,4 +1,4 @@
-package ts
+package tailscale
 
 // UserState represents the user's desired on/off state for a tailnet.
 type UserState string

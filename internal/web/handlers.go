@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
-	"github.com/jcambass/tailhopper/internal/ts"
+	"github.com/jcambass/tailhopper/internal/tailscale"
 	"github.com/jcambass/tailhopper/internal/ui"
 )
 
@@ -83,6 +83,10 @@ func tailnetStopHandler(reg *registry.Registry) http.HandlerFunc {
 	}
 }
 
+// logoutTimeout is the deadline for the logout call during tailnet deletion.
+// Must be long enough for the tsnet server to start (if stopped) and complete logout.
+const logoutTimeout = 10 * time.Second
+
 // tailnetDeleteHandler handles DELETE /tailnet/{id}
 func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +103,6 @@ func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaste
 			return
 		}
 
-		var logoutErr error
-
 		tailnet, ok := reg.Get(id)
 		if !ok {
 			slog.WarnContext(ctx, "tailnet not found",
@@ -112,37 +114,13 @@ func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaste
 		}
 
 		snapshot := tailnet.Snapshot()
-		if snapshot.State == ts.HasTerminalErrorState {
-			slog.InfoContext(r.Context(), "skipping logout for terminal-error tailnet",
-				slog.String("component", "httprequests"),
-				slog.Int("id", id),
-			)
-		} else {
-			// Give logout a deadline to prevent hanging the request indefinitely.
-			// Note that logout might internally start the tsnet server if it's not already started,
-			// so we need to give it enough time to do that and complete the logout process.
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
 
-			err = tailnet.Logout(ctx)
-			if err != nil {
-				slog.ErrorContext(r.Context(), "logout failed",
-					slog.String("component", "httprequests"),
-					slog.Int("id", id),
-					slog.Any("error", err),
-				)
-				logoutErr = err
-			} else {
-				slog.InfoContext(r.Context(), "logout succeeded",
-					slog.String("component", "httprequests"),
-					slog.Int("id", id),
-				)
-			}
-		}
+		// Attempt logout unless the tailnet already has a terminal error.
+		logoutErr := logoutBeforeDelete(ctx, tailnet, id, snapshot.State)
 
-		// Always delete regardless of logout success
+		// Always delete regardless of logout outcome.
 		if err := reg.Delete(id); err != nil {
-			slog.ErrorContext(r.Context(), "failed to delete tailnet",
+			slog.ErrorContext(ctx, "failed to delete tailnet",
 				slog.String("component", "httprequests"),
 				slog.Any("error", err),
 			)
@@ -150,37 +128,66 @@ func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaste
 			return
 		}
 
-		slog.InfoContext(r.Context(), "tailnet deleted successfully",
+		slog.InfoContext(ctx, "tailnet deleted successfully",
 			slog.String("component", "httprequests"),
 		)
 		broadcaster.BroadcastGlobalChange()
 
 		// Return toast HTML using OOB swap with htmx auto-removal
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-
-		var message, toastType string
-		if snapshot.State == ts.HasTerminalErrorState {
-			message = "Tailnet deleted successfully"
-			toastType = "success"
-		} else if logoutErr == nil {
-			message = "Tailnet deleted and logged out successfully"
-			toastType = "success"
-		} else {
-			message = fmt.Sprintf("Tailnet deleted, but logout failed: %s", logoutErr.Error())
-			toastType = "warning"
-		}
-
+		message, toastType := deleteResultMessage(snapshot.State, logoutErr)
 		toastHTML, err := ui.RenderToast(toastType, message)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "failed to render toast",
+			slog.ErrorContext(ctx, "failed to render toast",
 				slog.String("component", "httprequests"),
 				slog.Any("error", err),
 			)
 			return
 		}
+
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, toastHTML)
 	}
+}
+
+// logoutBeforeDelete attempts to log out unless the tailnet is in a terminal error state.
+func logoutBeforeDelete(ctx context.Context, tailnet *tailscale.Tailnet, id int, state tailscale.State) error {
+	if state == tailscale.HasTerminalErrorState {
+		slog.InfoContext(ctx, "skipping logout for terminal-error tailnet",
+			slog.String("component", "httprequests"),
+			slog.Int("id", id),
+		)
+		return nil
+	}
+
+	logoutCtx, cancel := context.WithTimeout(ctx, logoutTimeout)
+	defer cancel()
+
+	if err := tailnet.Logout(logoutCtx); err != nil {
+		slog.ErrorContext(ctx, "logout failed",
+			slog.String("component", "httprequests"),
+			slog.Int("id", id),
+			slog.Any("error", err),
+		)
+		return err
+	}
+
+	slog.InfoContext(ctx, "logout succeeded",
+		slog.String("component", "httprequests"),
+		slog.Int("id", id),
+	)
+	return nil
+}
+
+// deleteResultMessage returns the toast message and type for a tailnet deletion.
+func deleteResultMessage(state tailscale.State, logoutErr error) (string, string) {
+	if state == tailscale.HasTerminalErrorState {
+		return "Tailnet deleted successfully", "success"
+	}
+	if logoutErr == nil {
+		return "Tailnet deleted and logged out successfully", "success"
+	}
+	return fmt.Sprintf("Tailnet deleted, but logout failed: %s", logoutErr.Error()), "warning"
 }
 
 // addTailnetHandler handles POST /tailnet/add for creating a new tailnet.
