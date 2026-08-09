@@ -3,27 +3,28 @@ package socks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/net/socks5"
 )
 
-// Dialer is a function that dials a network connection.
-type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
-
 // Server is a SOCKS5 proxy server.
 type Server struct {
 	server   *socks5.Server
 	listener net.Listener
 	addr     string
+	mu       sync.Mutex
+	done     chan struct{}
 }
 
 // NewServer creates a new SOCKS5 server on the specified port.
-func NewServer(dial Dialer, port int) (*Server, error) {
+func NewServer(dial func(context.Context, string, string) (net.Conn, error), port int) (*Server, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -70,10 +71,20 @@ func NewServer(dial Dialer, port int) (*Server, error) {
 
 // Start begins serving SOCKS5 connections in the background.
 func (s *Server) Start() {
+	s.mu.Lock()
+	if s.done != nil {
+		s.mu.Unlock()
+		return
+	}
+	done := make(chan struct{})
+	s.done = done
+	s.mu.Unlock()
+
 	ctx := context.Background()
 	go func() {
+		defer close(done)
 		defer logging.CatchPanic(ctx)
-		if err := s.server.Serve(s.listener); err != nil {
+		if err := s.server.Serve(s.listener); err != nil && !errors.Is(err, net.ErrClosed) {
 			slog.ErrorContext(ctx, "SOCKS5 server error", slog.String("component", "socksserver"), slog.Any("error", err))
 		}
 	}()
@@ -82,5 +93,12 @@ func (s *Server) Start() {
 
 // Close stops the SOCKS5 server.
 func (s *Server) Close() error {
-	return s.listener.Close()
+	err := s.listener.Close()
+	s.mu.Lock()
+	done := s.done
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	return err
 }

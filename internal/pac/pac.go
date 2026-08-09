@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jcambass/tailhopper/internal/registry"
-	"github.com/jcambass/tailhopper/internal/tailscale"
 )
 
 // URLPath is the default URL path for serving the PAC file.
@@ -25,22 +24,21 @@ func writePAC(w http.ResponseWriter, content string) {
 	w.Write([]byte(content))
 }
 
-func buildPACForTailnets(tailnets []*tailscale.Tailnet) (string, []string) {
+func buildPACForTailnets(tailnets []registry.TailnetView) (string, []string) {
 	sb := strings.Builder{}
 	sb.WriteString("function FindProxyForURL(url, host) {\n")
 
 	var suffixes []string
 
-	for _, t := range tailnets {
-		snapshot := t.Snapshot()
-		suffix := snapshot.MagicDNSSuffix
+	for _, tailnet := range tailnets {
+		suffix := tailnet.MagicDNSSuffix
 		// Skip tailnets without a claimed MagicDNS suffix
 		if suffix == "" {
 			continue
 		}
 
 		suffixes = append(suffixes, suffix)
-		socksAddr := t.SocksAddr()
+		socksAddr := tailnet.SocksAddr()
 
 		sb.WriteString(fmt.Sprintf("    if (shExpMatch(host, \"*.%s\")) {\n", suffix))
 		// PAC fallback chain: browsers try each entry in order.
@@ -58,7 +56,7 @@ func buildPACForTailnets(tailnets []*tailscale.Tailnet) (string, []string) {
 func Handler(reg *registry.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		pac, suffixes := buildPACForTailnets(reg.List())
+		pac, suffixes := buildPACForTailnets(reg.List(ctx))
 		slog.InfoContext(ctx, "Serving PAC file", slog.String("component", "pac"), slog.String("suffixes", strings.Join(suffixes, ", ")))
 		writePAC(w, pac)
 	}

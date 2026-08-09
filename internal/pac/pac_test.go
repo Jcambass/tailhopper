@@ -6,8 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jcambass/tailhopper/internal/tailscale"
+	"github.com/jcambass/tailhopper/internal/registry"
 )
+
+func pacTailnet(suffix string, port int) registry.TailnetView {
+	return registry.TailnetView{MagicDNSSuffix: suffix, SocksPort: port}
+}
 
 func TestBuildPACForTailnets_Empty(t *testing.T) {
 	pac, suffixes := buildPACForTailnets(nil)
@@ -21,8 +25,8 @@ func TestBuildPACForTailnets_Empty(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_WithSuffix(t *testing.T) {
-	tn := tailscale.NewTailnet(1, "/tmp", "host", "my-tailnet.ts.net", "", true, 1080, nil, nil)
-	pac, suffixes := buildPACForTailnets([]*tailscale.Tailnet{tn})
+	tailnet := pacTailnet("my-tailnet.ts.net", 1080)
+	pac, suffixes := buildPACForTailnets([]registry.TailnetView{tailnet})
 
 	if len(suffixes) != 1 || suffixes[0] != "my-tailnet.ts.net" {
 		t.Errorf("suffixes = %v, want [my-tailnet.ts.net]", suffixes)
@@ -36,8 +40,8 @@ func TestBuildPACForTailnets_WithSuffix(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_SkipsEmptySuffix(t *testing.T) {
-	tn := tailscale.NewTailnet(1, "/tmp", "host", "", "", true, 1080, nil, nil)
-	pac, suffixes := buildPACForTailnets([]*tailscale.Tailnet{tn})
+	tailnet := pacTailnet("", 1080)
+	pac, suffixes := buildPACForTailnets([]registry.TailnetView{tailnet})
 
 	if len(suffixes) != 0 {
 		t.Errorf("expected 0 suffixes for unconfigured tailnet, got %d", len(suffixes))
@@ -48,9 +52,9 @@ func TestBuildPACForTailnets_SkipsEmptySuffix(t *testing.T) {
 }
 
 func TestBuildPACForTailnets_MultipleTailnets(t *testing.T) {
-	tn1 := tailscale.NewTailnet(1, "/tmp", "host1", "one.ts.net", "", true, 1080, nil, nil)
-	tn2 := tailscale.NewTailnet(2, "/tmp", "host2", "two.ts.net", "", true, 1081, nil, nil)
-	pac, suffixes := buildPACForTailnets([]*tailscale.Tailnet{tn1, tn2})
+	tailnet1 := pacTailnet("one.ts.net", 1080)
+	tailnet2 := pacTailnet("two.ts.net", 1081)
+	pac, suffixes := buildPACForTailnets([]registry.TailnetView{tailnet1, tailnet2})
 
 	if len(suffixes) != 2 {
 		t.Errorf("expected 2 suffixes, got %d", len(suffixes))

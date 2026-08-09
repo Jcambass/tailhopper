@@ -8,10 +8,9 @@
   <link rel="stylesheet" href="/static/ui.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/idiomorph-ext.min.js"></script>
-  <script src="/static/sse.js"></script>
   <script src="/static/ui.js" defer></script>
 </head>
-<body hx-ext="morph,sse" sse-connect="/events">
+<body hx-ext="morph">
   <!-- Toast notification system -->
   <div class="toast-container">
     <div id="toast-slot"></div>
@@ -123,10 +122,10 @@
   </div>
 
   <!-- Tailnets section -->
-  <div id="tailnets-container" hx-trigger="sse:global" hx-get="/" hx-select="#tailnets-container" hx-swap="morph">
+  <div id="tailnets-container" hx-trigger="every 2s" hx-get="/" hx-select="#tailnets-container" hx-swap="morph">
 
     {{range .Tailnets}}
-  <div class="tailnet-card{{if eq .StateClass "error"}} tailnet-card-error{{end}}" id="tailnet-card-{{.ID}}" hx-trigger="sse:tailnet-{{.ID}}" hx-get="/" hx-select="#tailnet-card-{{.ID}}" hx-swap="morph">
+  <div class="tailnet-card{{if eq .StateClass "error"}} tailnet-card-error{{end}}" id="tailnet-card-{{.ID}}">
     <div class="tailnet-header">
       {{template "tailnet_header" .}}
     </div>
@@ -170,8 +169,6 @@
             {{template "state_card_needs_auth" .}}
           {{else if eq .StateClass "error"}}
             {{template "state_card_error" .}}
-          {{else if eq .StateClass "logging-out"}}
-            {{template "state_card_logging_out" .}}
           {{end}}
           {{end}}
           </div>

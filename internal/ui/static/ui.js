@@ -18,3 +18,22 @@ function copyToClipboard(elementId) {
   });
 }
 
+var activeTabs = [];
+
+document.addEventListener('htmx:beforeSwap', function(event) {
+  if (event.detail.target && event.detail.target.id === 'tailnets-container') {
+    activeTabs = Array.from(event.detail.target.querySelectorAll('.tab-input:checked')).map(function(input) {
+      return input.id;
+    });
+  }
+});
+
+document.addEventListener('htmx:afterSwap', function(event) {
+  if (event.detail.target && event.detail.target.id === 'tailnets-container') {
+    activeTabs.forEach(function(id) {
+      var input = document.getElementById(id);
+      if (input) input.checked = true;
+    });
+  }
+});
+

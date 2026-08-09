@@ -3,17 +3,18 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
-	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/tailscale"
-	tsnetpkg "github.com/jcambass/tailhopper/internal/tsnet"
 	"tailscale.com/util/dnsname"
 )
 
@@ -31,29 +32,72 @@ type TailnetConfig struct {
 	// ClaimedMagicDNSSuffix is the domain we expect this tailnet to be logged into.
 	// If empty, it will be set upon first successful connection.
 	ClaimedMagicDNSSuffix string `json:"claimed_magic_dns_suffix,omitempty"`
-	// TerminalError stores a fatal error that prevents the tailnet from starting.
-	TerminalError string `json:"terminal_error,omitempty"`
+}
+
+var (
+	ErrTailnetNotFound     = errors.New("tailnet not found")
+	ErrUnconfiguredTailnet = errors.New("an unconfigured tailnet already exists")
+)
+
+type TailnetView struct {
+	ID                 int
+	ConfiguredHostname string
+	NodeHostname       string
+	MagicDNSSuffix     string
+	SocksPort          int
+	UserEnabled        bool
+	Started            bool
+	BackendState       string
+	AuthURL            string
+	Peers              []Peer
+	Error              string
+}
+
+type Peer struct {
+	Name      string
+	DNSName   string
+	Online    bool
+	Addresses []netip.Prefix
+}
+
+func (v TailnetView) EffectiveHostname() string {
+	if v.NodeHostname != "" {
+		return v.NodeHostname
+	}
+	return v.ConfiguredHostname
+}
+
+func (v TailnetView) SocksAddr() string {
+	return fmt.Sprintf("localhost:%d", v.SocksPort)
+}
+
+type tailnetEntry struct {
+	op      sync.Mutex
+	config  TailnetConfig
+	runtime runtime
+}
+
+type runtime interface {
+	Start(context.Context) error
+	Stop(context.Context) error
+	Info(context.Context) tailscale.Info
 }
 
 type Registry struct {
-	path        string
-	mu          sync.RWMutex
-	nextID      int
-	tailnets    map[int]*tailscale.Tailnet
-	configs     map[int]*TailnetConfig
-	broadcaster sse.Broadcaster
+	path    string
+	mu      sync.RWMutex
+	nextID  int
+	entries map[int]*tailnetEntry
 }
 
-func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
+func NewRegistry(path string) (*Registry, error) {
 	m := &Registry{
-		path:        path,
-		nextID:      1,
-		tailnets:    make(map[int]*tailscale.Tailnet),
-		configs:     make(map[int]*TailnetConfig),
-		broadcaster: broadcaster,
+		path:    path,
+		nextID:  1,
+		entries: make(map[int]*tailnetEntry),
 	}
 
-	if err := m.Load(); err != nil {
+	if err := m.load(); err != nil {
 		if os.IsNotExist(err) {
 			// It's okay if the file doesn't exist yet
 			return m, nil
@@ -64,8 +108,8 @@ func NewRegistry(path string, broadcaster sse.Broadcaster) (*Registry, error) {
 	return m, nil
 }
 
-// Load reads the config file and initializes the in-memory state.
-func (m *Registry) Load() error {
+// load reads the config file before any runtime can be started.
+func (m *Registry) load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -80,15 +124,13 @@ func (m *Registry) Load() error {
 		return err
 	}
 
-	m.tailnets = make(map[int]*tailscale.Tailnet)
-	m.configs = make(map[int]*TailnetConfig)
+	m.entries = make(map[int]*tailnetEntry)
 	m.nextID = 1
 
 	for _, c := range list {
 		c := c
-		tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, c.ClaimedMagicDNSSuffix, c.TerminalError, c.UserEnabled, c.SocksPort, m, tsnetpkg.NewRealTSNetServer)
-		m.tailnets[c.ID] = tailnet
-		m.configs[c.ID] = &c
+		runtime := tailscale.NewRuntime(c.ID, c.StateDir, c.Hostname, c.SocksPort)
+		m.entries[c.ID] = &tailnetEntry{config: c, runtime: runtime}
 
 		// Update nextID based on loaded IDs
 		if c.ID >= m.nextID {
@@ -97,55 +139,6 @@ func (m *Registry) Load() error {
 	}
 
 	return nil
-}
-
-// OnChange persists relevant fields from the snapshot, detects MagicDNS suffix
-// conflicts, and broadcasts changes to SSE listeners.
-func (m *Registry) OnChange(snapshot tailscale.TailnetSnapshot) {
-	m.mu.Lock()
-
-	tailnet, ok := m.tailnets[snapshot.ID]
-	if !ok {
-		m.mu.Unlock()
-		return
-	}
-
-	cfg := m.configs[snapshot.ID]
-	cfg.UserEnabled = snapshot.UserState == tailscale.UserEnabled
-	cfg.TerminalError = snapshot.TerminalError
-
-	// Detect a newly discovered MagicDNS suffix (only when the tailnet is healthy).
-	var suffixConflict string
-	newSuffix := snapshot.TerminalError == "" &&
-		snapshot.MagicDNSSuffix != "" &&
-		snapshot.MagicDNSSuffix != cfg.ClaimedMagicDNSSuffix
-
-	if newSuffix {
-		for otherID, otherCfg := range m.configs {
-			if otherID != snapshot.ID && otherCfg.ClaimedMagicDNSSuffix == snapshot.MagicDNSSuffix {
-				suffixConflict = fmt.Sprintf("magic DNS suffix '%s' is already claimed by another tailnet", snapshot.MagicDNSSuffix)
-				break
-			}
-		}
-		if suffixConflict == "" {
-			cfg.ClaimedMagicDNSSuffix = snapshot.MagicDNSSuffix
-		}
-	}
-
-	_ = m.saveConfigsLocked()
-	m.mu.Unlock()
-
-	if suffixConflict != "" {
-		tailnet.SetTerminalError(suffixConflict)
-		return // SetTerminalError will trigger OnChange again to persist the error state.
-	}
-
-	if m.broadcaster != nil {
-		if newSuffix {
-			m.broadcaster.BroadcastGlobalChange()
-		}
-		m.broadcaster.BroadcastTailnetChange(snapshot.ID)
-	}
 }
 
 func (m *Registry) saveConfigsLocked() error {
@@ -160,9 +153,9 @@ func (m *Registry) saveConfigsLocked() error {
 	}
 	defer f.Close()
 
-	list := make([]TailnetConfig, 0, len(m.configs))
-	for _, cfg := range m.configs {
-		list = append(list, *cfg)
+	list := make([]TailnetConfig, 0, len(m.entries))
+	for _, entry := range m.entries {
+		list = append(list, entry.config)
 	}
 
 	enc := json.NewEncoder(f)
@@ -170,62 +163,200 @@ func (m *Registry) saveConfigsLocked() error {
 	return enc.Encode(list)
 }
 
-// List returns all tailnets in the registry, sorted by their numeric ID.
-func (m *Registry) List() []*tailscale.Tailnet {
+func (m *Registry) configuredTailnets() []*tailnetEntry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var tailnets []*tailscale.Tailnet
-	for _, tailnet := range m.tailnets {
-		tailnets = append(tailnets, tailnet)
+	tailnets := make([]*tailnetEntry, 0, len(m.entries))
+	for _, entry := range m.entries {
+		tailnets = append(tailnets, entry)
 	}
 
-	// Return tailnets in sorted order by numeric ID for consistency.
 	sort.Slice(tailnets, func(i, j int) bool {
-		return tailnets[i].ID() < tailnets[j].ID()
+		return tailnets[i].config.ID < tailnets[j].config.ID
 	})
 
 	return tailnets
 }
 
-// RestoreEnabledTailnets starts tailnets that were user-enabled before shutdown.
-//
-// We only auto-start tailnets that are currently in StoppedState to avoid
-// interfering with terminal/error states restored from persisted config.
-func (m *Registry) RestoreEnabledTailnets(ctx context.Context) {
-	tailnets := m.List()
+// List derives presentation data from persisted config and authoritative
+// Tailscale status. Runtime status is never cached by Tailhopper.
+func (m *Registry) List(ctx context.Context) []TailnetView {
+	configured := m.configuredTailnets()
 
-	for _, tailnet := range tailnets {
-		snapshot := tailnet.Snapshot()
-		if snapshot.UserState != tailscale.UserEnabled {
+	tailnets := make([]TailnetView, 0, len(configured))
+	for _, entry := range configured {
+		info := entry.runtime.Info(ctx)
+		view := m.view(entry, info)
+		tailnets = append(tailnets, view)
+	}
+	return tailnets
+}
+
+func (m *Registry) view(entry *tailnetEntry, info tailscale.Info) TailnetView {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config := entry.config
+	view := TailnetView{
+		ID:                 config.ID,
+		ConfiguredHostname: config.Hostname,
+		MagicDNSSuffix:     config.ClaimedMagicDNSSuffix,
+		SocksPort:          config.SocksPort,
+		UserEnabled:        config.UserEnabled,
+		Started:            info.Started,
+		Error:              info.Error,
+	}
+	if info.Status == nil {
+		return view
+	}
+	view.BackendState = info.Status.BackendState
+	view.AuthURL = info.Status.AuthURL
+	if info.Status.Self != nil {
+		view.NodeHostname = info.Status.Self.HostName
+	}
+	if info.Status.CurrentTailnet != nil {
+		discovered := info.Status.CurrentTailnet.MagicDNSSuffix
+		if discovered != "" && config.ClaimedMagicDNSSuffix == "" {
+			for otherID, other := range m.entries {
+				if otherID != config.ID && other.config.ClaimedMagicDNSSuffix == discovered {
+					view.Error = fmt.Sprintf("magic DNS suffix '%s' is already claimed by another tailnet", discovered)
+					return view
+				}
+			}
+			entry.config.ClaimedMagicDNSSuffix = discovered
+			view.MagicDNSSuffix = discovered
+			if err := m.saveConfigsLocked(); err != nil {
+				view.Error = err.Error()
+			}
+		} else if discovered != "" && discovered != config.ClaimedMagicDNSSuffix {
+			view.Error = fmt.Sprintf("tailnet reported unexpected magic DNS suffix '%s'", discovered)
+		}
+	}
+	for _, peer := range info.Status.Peer {
+		addresses := make([]netip.Prefix, 0, len(peer.TailscaleIPs))
+		for _, address := range peer.TailscaleIPs {
+			addresses = append(addresses, netip.PrefixFrom(address, address.BitLen()))
+		}
+		view.Peers = append(view.Peers, Peer{
+			Name:      peer.HostName,
+			DNSName:   strings.TrimSuffix(peer.DNSName, "."),
+			Online:    peer.Online,
+			Addresses: addresses,
+		})
+	}
+	return view
+}
+
+// Start records enabled intent before starting runtime resources. A startup
+// failure leaves the intent enabled so it can be restored on the next launch.
+func (m *Registry) Start(ctx context.Context, id int) error {
+	entry, err := m.entry(id)
+	if err != nil {
+		return err
+	}
+	entry.op.Lock()
+	defer entry.op.Unlock()
+	if err := m.setEnabled(entry, true); err != nil {
+		return err
+	}
+	if err := entry.runtime.Start(ctx); err != nil {
+		return err
+	}
+	// Discover persistent Tailnet identity immediately; later status is read by
+	// dashboard and PAC requests.
+	m.view(entry, entry.runtime.Info(ctx))
+	return nil
+}
+
+// Stop records disabled intent before stopping runtime resources.
+func (m *Registry) Stop(ctx context.Context, id int) error {
+	entry, err := m.entry(id)
+	if err != nil {
+		return err
+	}
+	entry.op.Lock()
+	defer entry.op.Unlock()
+	if err := m.setEnabled(entry, false); err != nil {
+		return err
+	}
+	return entry.runtime.Stop(ctx)
+}
+
+func (m *Registry) entry(id int) (*tailnetEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, ok := m.entries[id]
+	if !ok {
+		return nil, ErrTailnetNotFound
+	}
+	return entry, nil
+}
+
+func (m *Registry) setEnabled(entry *tailnetEntry, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.entries[entry.config.ID] != entry {
+		return ErrTailnetNotFound
+	}
+
+	previous := entry.config.UserEnabled
+	if previous == enabled {
+		return nil
+	}
+	entry.config.UserEnabled = enabled
+	if err := m.saveConfigsLocked(); err != nil {
+		entry.config.UserEnabled = previous
+		return err
+	}
+	return nil
+}
+
+// RestoreEnabledTailnets starts tailnets that were user-enabled before shutdown.
+func (m *Registry) RestoreEnabledTailnets(ctx context.Context) {
+	configured := m.configuredTailnets()
+
+	for _, entry := range configured {
+		m.mu.RLock()
+		enabled := m.entries[entry.config.ID] == entry && entry.config.UserEnabled
+		m.mu.RUnlock()
+		if !enabled {
 			continue
 		}
 
-		if snapshot.State != tailscale.StoppedState {
+		info := entry.runtime.Info(ctx)
+		if info.Started {
 			continue
 		}
 
 		slog.InfoContext(ctx, "restoring enabled tailnet",
 			slog.String("component", "registry"),
-			slog.Int("tailnet_id", tailnet.ID()),
+			slog.Int("tailnet_id", entry.config.ID),
 		)
 
-		if err := tailnet.Start(ctx); err != nil {
+		if err := entry.runtime.Start(ctx); err != nil {
 			slog.ErrorContext(ctx, "failed to restore enabled tailnet",
 				slog.String("component", "registry"),
-				slog.Int("tailnet_id", tailnet.ID()),
+				slog.Int("tailnet_id", entry.config.ID),
 				slog.Any("error", err),
 			)
 		}
 	}
 }
 
-// Add creates a new unconfigured tailnet with the given hostname and returns it.
+// Add creates a new unconfigured tailnet with the given hostname and returns its ID.
 // If hostname is empty, a default one will be generated based on the machine's hostname.
 // Example: if the machine's hostname is "laptop", the generated hostname will be "laptop-tailhopper".
-func (m *Registry) Add(hostname string) (*tailscale.Tailnet, error) {
+func (m *Registry) Add(hostname string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	for _, entry := range m.entries {
+		if entry.config.ClaimedMagicDNSSuffix == "" {
+			return 0, ErrUnconfiguredTailnet
+		}
+	}
 
 	id := m.nextID
 	m.nextID++
@@ -245,7 +376,7 @@ func (m *Registry) Add(hostname string) (*tailscale.Tailnet, error) {
 	// Find an available port for SOCKS proxy
 	socksPort, err := findAvailablePort()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find available port: %w", err)
+		return 0, fmt.Errorf("failed to find available port: %w", err)
 	}
 
 	c := TailnetConfig{
@@ -255,80 +386,61 @@ func (m *Registry) Add(hostname string) (*tailscale.Tailnet, error) {
 		SocksPort: socksPort,
 	}
 
-	tailnet := tailscale.NewTailnet(c.ID, c.StateDir, c.Hostname, "", "", false, c.SocksPort, m, tsnetpkg.NewRealTSNetServer)
+	runtime := tailscale.NewRuntime(c.ID, c.StateDir, c.Hostname, c.SocksPort)
 
-	m.tailnets[c.ID] = tailnet
-	m.configs[c.ID] = &c
+	m.entries[c.ID] = &tailnetEntry{config: c, runtime: runtime}
 
 	// Rollback on save failure
 	if err := m.saveConfigsLocked(); err != nil {
-		delete(m.tailnets, c.ID)
-		delete(m.configs, c.ID)
-		return nil, err
+		delete(m.entries, c.ID)
+		return 0, err
 	}
 
-	// Notify about global change (new tailnet added)
-	if m.broadcaster != nil {
-		m.broadcaster.BroadcastGlobalChange()
-	}
-
-	return tailnet, nil
+	return id, nil
 }
 
 // Delete removes a tailnet from the registry and deletes its state directory from disk.
 func (m *Registry) Delete(id int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	entry, err := m.entry(id)
+	if err != nil {
+		return err
+	}
+	entry.op.Lock()
+	defer entry.op.Unlock()
 
-	cfg, exists := m.configs[id]
-	if !exists {
-		return fmt.Errorf("tailnet not found")
+	if err := entry.runtime.Stop(context.Background()); err != nil {
+		slog.Warn("failed to stop tailnet during deletion",
+			slog.String("component", "registry"),
+			slog.Int("tailnet_id", id),
+			slog.Any("error", err))
 	}
 
-	if cfg.StateDir != "" {
+	if entry.config.StateDir != "" {
 		// Delete the state directory from disk
-		if err := os.RemoveAll(cfg.StateDir); err != nil {
-			slog.Error("failed to remove state directory", slog.String("component", "registry"), slog.String("dir", cfg.StateDir), slog.Any("error", err))
+		if err := os.RemoveAll(entry.config.StateDir); err != nil {
+			slog.Error("failed to remove state directory", slog.String("component", "registry"), slog.String("dir", entry.config.StateDir), slog.Any("error", err))
 			// Continue with deletion even if directory removal fails
 		}
 	}
 
-	delete(m.tailnets, id)
-	delete(m.configs, id)
+	m.mu.Lock()
+	if m.entries[id] != entry {
+		m.mu.Unlock()
+		return ErrTailnetNotFound
+	}
+	delete(m.entries, id)
 
 	if err := m.saveConfigsLocked(); err != nil {
-		// If save fails, we're in an inconsistent state in memory vs disk.
-		// But the object is gone from memory. This is a best effort.
+		// The tailnet is gone from memory but the on-disk config still lists it;
+		// it will be pruned on the next successful save. Best effort.
+		slog.Error("failed to persist config after delete",
+			slog.String("component", "registry"),
+			slog.Int("tailnet_id", id),
+			slog.Any("error", err))
 	}
-
-	// Notify about global change (tailnet deleted)
-	if m.broadcaster != nil {
-		m.broadcaster.BroadcastGlobalChange()
-	}
+	m.mu.Unlock()
 
 	return nil
-}
-
-// Get retrieves a tailnet by ID. The boolean indicates if the tailnet was found.
-func (m *Registry) Get(id int) (*tailscale.Tailnet, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	t, ok := m.tailnets[id]
-	return t, ok
-}
-
-// HasUnconfiguredTailnets returns true if any tailnet hasn't been configured (no MagicDNS suffix claimed) yet.
-func (m *Registry) HasUnconfiguredTailnets() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, cfg := range m.configs {
-		if cfg.ClaimedMagicDNSSuffix == "" {
-			return true
-		}
-	}
-	return false
 }
 
 // findAvailablePort finds an available port by temporarily binding to 127.0.0.1:0.

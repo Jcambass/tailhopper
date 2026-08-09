@@ -10,19 +10,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/registry"
-	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ui"
 )
 
-// Server represents the HTTP server for Tailhopper.
-type Server struct {
-	server       *http.Server
-	addr         string
-	sseBroadcast *sse.SSEBroadcaster
-}
-
-// NewServer creates and configures a new HTTP server.
-func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcaster) *Server {
+// ListenAndServe configures and runs the Tailhopper HTTP server.
+func ListenAndServe(addr string, reg *registry.Registry) error {
 	r := chi.NewRouter()
 
 	// Global middleware stack
@@ -43,11 +35,6 @@ func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcas
 	// PAC file
 	r.Get(pac.URLPath, pac.Handler(reg))
 
-	// SSE endpoint
-	r.Get("/events", func(w http.ResponseWriter, r *http.Request) {
-		broadcaster.ServeSSE(w, r)
-	})
-
 	// Dashboard
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		ui.ServeDashboard(w, r, reg, addr)
@@ -60,10 +47,10 @@ func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcas
 
 	// Tailnet routes
 	r.Route("/tailnet", func(r chi.Router) {
-		r.Post("/add", addTailnetHandler(reg, broadcaster))
+		r.Post("/add", addTailnetHandler(reg))
 		r.Post("/{id}/start", tailnetStartHandler(reg))
 		r.Post("/{id}/stop", tailnetStopHandler(reg))
-		r.Delete("/{id}", tailnetDeleteHandler(reg, broadcaster))
+		r.Delete("/{id}", tailnetDeleteHandler(reg))
 	})
 
 	// Handle 404
@@ -86,26 +73,17 @@ func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcas
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	return &Server{
-		server: &http.Server{
-			Addr:              addr,
-			Handler:           r,
-			ReadHeaderTimeout: 10 * time.Second,
-		},
-		addr:         addr,
-		sseBroadcast: broadcaster,
-	}
-}
-
-// Start begins serving HTTP requests (blocking).
-func (s *Server) Start() error {
 	slog.Info("PAC file available",
 		slog.String("component", "httpserver"),
-		slog.String("url", fmt.Sprintf("http://%s%s", s.addr, pac.URLPath)),
+		slog.String("url", fmt.Sprintf("http://%s%s", addr, pac.URLPath)),
 	)
 	slog.Info("Dashboard available",
 		slog.String("component", "httpserver"),
-		slog.String("url", fmt.Sprintf("http://%s", s.addr)),
+		slog.String("url", fmt.Sprintf("http://%s", addr)),
 	)
-	return s.server.ListenAndServe()
+	return (&http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}).ListenAndServe()
 }
