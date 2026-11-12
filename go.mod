@@ -2,10 +2,7 @@ module github.com/jcambass/tailhopper
 
 go 1.26.4
 
-require (
-	github.com/go-chi/chi/v5 v5.5.0
-	tailscale.com v1.100.0
-)
+require tailscale.com v1.100.0
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

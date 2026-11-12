@@ -100,13 +100,17 @@ func (b *SSEBroadcaster) BroadcastGlobalChange() {
 	b.Broadcast("global")
 }
 
-// ServeSSE handles SSE HTTP requests.
+// ServeSSE streams events for GET requests and returns only headers for HEAD.
 func (b *SSEBroadcaster) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method == http.MethodHead {
+		return
+	}
 
 	// Create subscription
 	clientID, eventChan := b.Subscribe(r.Context())

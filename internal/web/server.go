@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jcambass/tailhopper/internal/pac"
 	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
@@ -23,73 +21,44 @@ type Server struct {
 
 // NewServer creates and configures a new HTTP server.
 func NewServer(addr string, reg *registry.Registry, broadcaster *sse.SSEBroadcaster) *Server {
-	r := chi.NewRouter()
-
-	// Global middleware stack
-	r.Use(middleware.RequestID)     // Built-in: generates request IDs
-	r.Use(withLoggingContext)       // Custom: integrates request ID with logging context
-	r.Use(middleware.Recoverer)     // Built-in: graceful panic recovery
-	r.Use(middleware.RealIP)        // Built-in: extract real IP from headers
-	r.Use(requestLoggingMiddleware) // Custom: structured request logging
+	mux := http.NewServeMux()
 
 	// Static files
-	r.Handle("/static/*", ui.StaticHandler())
+	mux.Handle("/static/", ui.StaticHandler())
 
 	// Redirects
-	r.Get("/ui/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /ui/{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 	})
 
 	// PAC file
-	r.Get(pac.URLPath, pac.Handler(reg))
+	mux.HandleFunc("GET "+pac.URLPath, pac.Handler(reg))
 
 	// SSE endpoint
-	r.Get("/events", func(w http.ResponseWriter, r *http.Request) {
-		broadcaster.ServeSSE(w, r)
-	})
+	mux.HandleFunc("GET /events", broadcaster.ServeSSE)
 
 	// Dashboard
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		ui.ServeDashboard(w, r, reg, addr)
 	})
 
 	// API endpoints
-	r.Post("/api/noop", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/noop", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
 	// Tailnet routes
-	r.Route("/tailnet", func(r chi.Router) {
-		r.Post("/add", addTailnetHandler(reg, broadcaster))
-		r.Post("/{id}/start", tailnetStartHandler(reg))
-		r.Post("/{id}/stop", tailnetStopHandler(reg))
-		r.Delete("/{id}", tailnetDeleteHandler(reg, broadcaster))
-	})
+	mux.HandleFunc("POST /tailnet/add", addTailnetHandler(reg, broadcaster))
+	mux.HandleFunc("POST /tailnet/{id}/start", tailnetStartHandler(reg))
+	mux.HandleFunc("POST /tailnet/{id}/stop", tailnetStopHandler(reg))
+	mux.HandleFunc("DELETE /tailnet/{id}", tailnetDeleteHandler(reg, broadcaster))
 
-	// Handle 404
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		slog.WarnContext(r.Context(), "route not found",
-			slog.String("component", "httprequests"),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-		)
-		http.Error(w, "not found", http.StatusNotFound)
-	})
-
-	// Handle 405 (method not allowed)
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		slog.WarnContext(r.Context(), "method not allowed",
-			slog.String("component", "httprequests"),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-		)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	})
+	handler := withLoggingContext(panicRecoveryMiddleware(requestLoggingMiddleware(mux)))
 
 	return &Server{
 		server: &http.Server{
 			Addr:              addr,
-			Handler:           r,
+			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 		addr:         addr,

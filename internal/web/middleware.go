@@ -1,23 +1,44 @@
 package web
 
 import (
+	"crypto/rand"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jcambass/tailhopper/internal/logging"
 )
 
-// withLoggingContext integrates chi's request ID with your custom logging context.
+// withLoggingContext preserves a supplied request ID or generates one for logging.
 func withLoggingContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		// chi's RequestID middleware stores the ID under middleware.RequestIDKey
-		requestID := middleware.GetReqID(ctx)
-		if requestID != "" {
-			ctx = logging.WithRequestID(ctx, requestID)
-			r = r.WithContext(ctx)
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = rand.Text()
 		}
+		ctx := logging.WithRequestID(r.Context(), requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func panicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				if recovered == http.ErrAbortHandler {
+					panic(recovered)
+				}
+				slog.ErrorContext(r.Context(), "panic recovered",
+					slog.String("component", "httprequests"),
+					slog.Any("error", fmt.Errorf("%v", recovered)),
+					slog.String("stack", string(debug.Stack())),
+				)
+				if r.Header.Get("Connection") != "Upgrade" {
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }
