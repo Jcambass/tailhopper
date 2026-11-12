@@ -165,6 +165,8 @@ Tailhopper outputs structured logs in [logfmt](https://brandur.org/logfmt) forma
 ./tailhopper 2>&1 | hl
 ```
 
+HTTP logs include a `request_id`, taken from `X-Request-ID` when supplied or generated for the request. The dashboard listens on `127.0.0.1`, and `remote_addr` records the connection peer without trusting forwarding headers.
+
 ## Release process
 
 This section is for maintainers.

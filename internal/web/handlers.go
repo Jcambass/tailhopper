@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jcambass/tailhopper/internal/registry"
 	"github.com/jcambass/tailhopper/internal/sse"
 	"github.com/jcambass/tailhopper/internal/ts"
@@ -19,7 +18,7 @@ import (
 func tailnetStartHandler(reg *registry.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		idStr := chi.URLParam(r, "id")
+		idStr := r.PathValue("id")
 
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -53,7 +52,7 @@ func tailnetStartHandler(reg *registry.Registry) http.HandlerFunc {
 func tailnetStopHandler(reg *registry.Registry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		idStr := chi.URLParam(r, "id")
+		idStr := r.PathValue("id")
 
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -87,7 +86,7 @@ func tailnetStopHandler(reg *registry.Registry) http.HandlerFunc {
 func tailnetDeleteHandler(reg *registry.Registry, broadcaster *sse.SSEBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		idStr := chi.URLParam(r, "id")
+		idStr := r.PathValue("id")
 
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
