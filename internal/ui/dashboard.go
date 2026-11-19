@@ -83,25 +83,25 @@ func ServeDashboard(w http.ResponseWriter, r *http.Request, reg *registry.Regist
 			peers := snapshot.Peers
 			// Add peer machines
 			for _, peer := range peers {
-				if peer.Addresses().Len() == 0 {
+				if len(peer.Addresses) == 0 {
 					continue
 				}
 
-				machineName := peer.ComputedName()
+				machineName := peer.ComputedName
 
 				statusClass := "offline"
 				statusText := "offline"
-				if peer.Online().Get() {
+				if peer.Online {
 					statusClass = "online"
 					statusText = "online"
 				}
 
 				mv := machineView{
 					Name:        machineName,
-					DNSName:     peer.Name(),
+					DNSName:     peer.DNSName,
 					StatusClass: statusClass,
 					StatusText:  statusText,
-					IPs:         strings.Join(formatIPs(peer.Addresses().AsSlice()), ", "),
+					IPs:         strings.Join(formatIPs(peer.Addresses), ", "),
 				}
 
 				card.Machines = append(card.Machines, mv)
