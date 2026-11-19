@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/jcambass/tailhopper/internal/logging"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
-	"tailscale.com/tailcfg"
+	"tailscale.com/ipn/ipnstate"
 )
 
 type watcher struct {
@@ -54,7 +55,7 @@ func (w *watcher) start() error {
 		defer logging.CatchPanic(context.Background())
 		defer w.logger.Debug("IPN watcher goroutine exiting")
 
-		watcher, err := w.localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialNetMap)
+		watcher, err := w.localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges)
 		if err != nil {
 			if ctx.Err() != nil {
 				w.logger.Debug("IPN watcher canceled before subscription was established", slog.Any("error", err))
@@ -82,8 +83,19 @@ func (w *watcher) start() error {
 			}
 
 			w.logger.Debug("Received IPN notification", slog.String("notification", n.String()))
+			var st *ipnstate.Status
+			switch {
+			case n.InitialStatus != nil:
+				st = n.InitialStatus
+			case needsStatusRefresh(&n):
+				st, err = w.localClient.Status(ctx)
+				if err != nil {
+					w.logger.Warn("failed to fetch status", slog.Any("error", err))
+					st = nil
+				}
+			}
 			w.mu.Lock()
-			w.state = w.state.refresh(&n)
+			w.state = w.state.refresh(&n, st)
 			w.mu.Unlock()
 			w.logger.Debug("Updated IPN state", slog.String("state", w.state.String()))
 			w.onState(ctx, w.state)
@@ -130,24 +142,33 @@ type IPNState struct {
 	// BrowseToURL, if non-nil, UI should open a browser right now
 	BrowseToURL *string
 
-	//// From Notify.NetMap.*
-	// SelfNode is the current node's view of itself.
-	SelfNode tailcfg.NodeView
+	//// From ipnstate.Status
+	// SelfHostname is the current node's short name.
+	SelfHostname string
 	// MagicDNSSuffix is the MagicDNS suffix for the Tailnet, if any.
 	// This can be used for routing but will not work for shared-in nodes or if magic DNS is disabled.
 	MagicDNSSuffix string
 
 	// Peers is the list of peers in the Tailnet.
-	Peers []tailcfg.NodeView
-	// DisplayMessages are the list of health check problems for this
-	// node from the perspective of the control plane.
-	// If empty, there are no known problems from the control plane's
-	// point of view, but the node might know about its own health
-	// check problems.
-	DisplayMessages map[tailcfg.DisplayMessageID]tailcfg.DisplayMessage
+	Peers []Peer
 }
 
-func (s IPNState) refresh(n *ipn.Notify) IPNState {
+type Peer struct {
+	// DNSName is the peer's MagicDNS FQDN, e.g. "host.tail-scale.ts.net.".
+	DNSName      string
+	ComputedName string
+	Online       bool
+	Addresses    []netip.Addr
+}
+
+// needsStatusRefresh reports whether n signals a change in self or peers.
+// The netmap is no longer delivered over the IPN bus, so these are re-read via Status.
+func needsStatusRefresh(n *ipn.Notify) bool {
+	return n.SelfChange != nil || len(n.PeersChanged) > 0 || len(n.PeersRemoved) > 0 ||
+		len(n.PeerChangedPatch) > 0 || (n.State != nil && *n.State == ipn.Running)
+}
+
+func (s IPNState) refresh(n *ipn.Notify, st *ipnstate.Status) IPNState {
 	if n.State != nil {
 		s.State = n.State
 	}
@@ -157,22 +178,36 @@ func (s IPNState) refresh(n *ipn.Notify) IPNState {
 	if n.BrowseToURL != nil {
 		s.BrowseToURL = n.BrowseToURL
 	}
-	if n.NetMap != nil {
-		s.SelfNode = n.NetMap.SelfNode
-		if n.NetMap.SelfNode.Valid() && n.NetMap.SelfNode.Name() != "" {
-			// TODO: Explicitly error out if magic DNS is disabled
-			// Or find a sane way to handle these cases.
-			// We might still get the proper value here but we can't connect to it.
-			// Maybe handle somewhere else?
-			magicDNSSuffix := extractMagicDNSSuffix(n.NetMap.SelfNode.Name())
-			if magicDNSSuffix != "" {
-				s.MagicDNSSuffix = magicDNSSuffix
-			}
+	if st == nil {
+		return s
+	}
+	if st.Self != nil && st.Self.DNSName != "" {
+		s.SelfHostname = computedName(st.Self)
+		// TODO: Explicitly error out if magic DNS is disabled
+		// Or find a sane way to handle these cases.
+		// We might still get the proper value here but we can't connect to it.
+		// Maybe handle somewhere else?
+		if magicDNSSuffix := extractMagicDNSSuffix(st.Self.DNSName); magicDNSSuffix != "" {
+			s.MagicDNSSuffix = magicDNSSuffix
 		}
-		s.Peers = n.NetMap.Peers
-		s.DisplayMessages = n.NetMap.DisplayMessages
+	}
+	s.Peers = make([]Peer, 0, len(st.Peer))
+	for _, ps := range st.Peer {
+		s.Peers = append(s.Peers, Peer{
+			DNSName:      ps.DNSName,
+			ComputedName: computedName(ps),
+			Online:       ps.Online,
+			Addresses:    ps.TailscaleIPs,
+		})
 	}
 	return s
+}
+
+func computedName(ps *ipnstate.PeerStatus) string {
+	if name, _, _ := strings.Cut(strings.TrimSuffix(ps.DNSName, "."), "."); name != "" {
+		return name
+	}
+	return ps.HostName
 }
 
 // Example: "host.tail-scale.ts.net." -> "tail-scale.ts.net"
@@ -199,14 +234,11 @@ func (s IPNState) String() string {
 		fmt.Fprintf(&sb, "url=%q ", *s.BrowseToURL)
 	}
 
-	if s.SelfNode.Valid() {
-		fmt.Fprintf(&sb, "selfNode=%v ", s.SelfNode.ComputedName())
+	if s.SelfHostname != "" {
+		fmt.Fprintf(&sb, "selfNode=%v ", s.SelfHostname)
 	}
 	if len(s.Peers) > 0 {
 		fmt.Fprintf(&sb, "peers=%d ", len(s.Peers))
-	}
-	if len(s.DisplayMessages) > 0 {
-		fmt.Fprintf(&sb, "displayMessages=%d ", len(s.DisplayMessages))
 	}
 	str := sb.String()
 	if str == "IPNState{" {

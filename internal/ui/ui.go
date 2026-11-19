@@ -29,7 +29,7 @@ func init() {
 	}
 }
 
-func formatIPs(ips []netip.Prefix) []string {
+func formatIPs(ips []netip.Addr) []string {
 	result := make([]string, len(ips))
 	for i, ip := range ips {
 		result[i] = ip.String()

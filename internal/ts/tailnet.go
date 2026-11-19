@@ -11,7 +11,6 @@ import (
 
 	"github.com/jcambass/tailhopper/internal/socks"
 	"tailscale.com/ipn"
-	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
 
@@ -42,11 +41,11 @@ type Tailnet struct {
 	// Also changed by IPN state changes.
 	claimedMagicDNSSuffix string
 	terminalError         string
-	peers                 []tailcfg.NodeView
+	peers                 []Peer
 	loginURL              string
 	currentState          State
 	// selfNodeHostname is the hostname reported by Tailscale for our own node.
-	// Populated once the NetMap is received; empty until then.
+	// Populated once the status is received; empty until then.
 	selfNodeHostname string
 
 	// userState tracks the user's desired on/off state, independent of the
@@ -61,7 +60,7 @@ type TailnetSnapshot struct {
 	MagicDNSSuffix string
 	Hostname       string
 	LoginURL       string
-	Peers          []tailcfg.NodeView
+	Peers          []Peer
 	TerminalError  string
 }
 
@@ -562,10 +561,7 @@ func (t *Tailnet) updatePeersLocked(ipnState IPNState) bool {
 }
 
 func (t *Tailnet) maybeUpdateSelfNodeHostnameLocked(ipnState IPNState) bool {
-	if !ipnState.SelfNode.Valid() {
-		return false
-	}
-	hostname := ipnState.SelfNode.ComputedName()
+	hostname := ipnState.SelfHostname
 	if hostname == "" || hostname == t.selfNodeHostname {
 		return false
 	}
